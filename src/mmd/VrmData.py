@@ -12,6 +12,8 @@ logger = MLogger(__name__, level=MLogger.DEBUG)
 class VrmModel:
     def __init__(self):
         self.path = ''
-    
+        self.digest = None
+        self.json_data = None
+            
     
 

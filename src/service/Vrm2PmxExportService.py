@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from module.MOptions import MExportOptions
 from mmd.VrmData import VrmModel # noqa
+from mmd.VrmReader import VrmReader
 from mmd.PmxData import PmxModel # noqa
 from module.MMath import MRect, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
@@ -30,6 +31,10 @@ class Vrm2PmxExportService():
                                     vmd=os.path.basename(self.options.vrm_model.path)) # noqa
 
             logger.info(service_data_txt, decoration=MLogger.DECORATION_BOX)
+
+            # vrm展開
+            reader = VrmReader(self.options.vrm_model.path)
+            reader.convert_glTF(self.options.vrm_model, self.options.output_path)
 
             # 処理に成功しているか
             result = self.convert_pmx()
