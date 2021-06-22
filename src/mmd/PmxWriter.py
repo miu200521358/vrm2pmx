@@ -56,9 +56,11 @@ class PmxWriter:
             bone_idx_size, bone_idx_type, bone_idx_unsigned_type = self.define_index_size(len(pmx.bones))
             fout.write(struct.pack(TYPE_BYTE, bone_idx_size))
             # モーフIndexサイズ | 1,2,4 のいずれか
-            fout.write(struct.pack(TYPE_BYTE, 1))
+            morph_idx_size, morph_idx_type, morph_idx_unsigned_type = self.define_index_size(len(pmx.morphs))
+            fout.write(struct.pack(TYPE_BYTE, morph_idx_size))
             # 剛体Indexサイズ | 1,2,4 のいずれか
-            fout.write(struct.pack(TYPE_BYTE, 1))
+            rigidbody_idx_size, rigidbody_idx_type, rigidbody_idx_unsigned_type = self.define_index_size(len(pmx.rigidbodies))
+            fout.write(struct.pack(TYPE_BYTE, rigidbody_idx_size))
 
             # モデル名(日本語)
             self.write_text(fout, pmx.name, "Vrm Model")
@@ -176,8 +178,12 @@ class PmxWriter:
                 fout.write(struct.pack(TYPE_BYTE, material.sphere_mode))
                 # 共有Toonフラグ
                 fout.write(struct.pack(TYPE_BYTE, material.toon_sharing_flag))
-                # 共有Toonテクスチャ[0～9]
-                fout.write(struct.pack(TYPE_BYTE, material.toon_texture_index))
+                if material.toon_sharing_flag == 0:
+                    # 共有Toonテクスチャ[0～9]
+                    fout.write(struct.pack(texture_idx_type, material.toon_texture_index))
+                else:
+                    # 共有Toonテクスチャ[0～9]
+                    fout.write(struct.pack(TYPE_BYTE, material.toon_texture_index))
                 # コメント
                 self.write_text(fout, material.comment, "")
                 # 材質に対応する面(頂点)数
@@ -187,6 +193,23 @@ class PmxWriter:
 
             # ボーンの数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.bones.values()))))
+
+            for bidx, bone in enumerate(pmx.bones.values()):
+                # ボーン名
+                self.write_text(fout, bone.name, f"Bone {bidx}")
+                self.write_text(fout, bone.english_name, f"Bone {bidx}")
+                # position
+                fout.write(struct.pack(TYPE_FLOAT, float(bone.position.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(bone.position.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(bone.position.z())))
+                # 親ボーンのボーンIndex
+                fout.write(struct.pack(bone_idx_type, bone.parent_index))
+                # 変形階層
+                fout.write(struct.pack(TYPE_INT, bone.layer))
+                # ボーンフラグ
+                fout.write(struct.pack(TYPE_SHORT, bone.flag))
+                # 接続先ボーンのボーンIndex
+                fout.write(struct.pack(bone_idx_type, bone.tail_index))
 
             logger.info(f"-- ボーンデータ出力終了({len(list(pmx.bones.values()))})")
 

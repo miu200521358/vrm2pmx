@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 #
-from math import pi
-from operator import pos
+from PIL import Image, ImageChops
+import glob
 import struct
-import hashlib
 import os
 import json
 from pathlib import Path
 import shutil
+import numpy as np
+import re
 
 from mmd.VrmData import VrmModel # noqa
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
@@ -122,7 +123,7 @@ class VrmReader(PmxReader):
                             pmx.textures.append(os.path.join("tex", image_name))
                             # テクスチャコピー
                             shutil.copy(os.path.join(glft_dir_path, image_name), os.path.join(tex_dir_path, image_name))
-
+                
                 logger.info("-- テクスチャデータ解析終了")
 
                 vertex_idx = 0
@@ -148,7 +149,7 @@ class VrmReader(PmxReader):
                                         uvs = self.read_from_accessor(vrm, primitive["attributes"]["TEXCOORD_0"])
                                         
                                         for vidx, (position, normal, uv) in enumerate(zip(positions, normals, uvs)):
-                                            vertex = Vertex(vertex_idx, position * MIKU_METER, normal, uv, None, Bdef1(1), 1)
+                                            vertex = Vertex(vertex_idx, position * MIKU_METER * MVector3D(-1, 1, 1), normal * MVector3D(-1, 1, 1), uv, None, Bdef1(1), 1)
                                             if vidx == 0:
                                                 # ブロック毎の開始頂点INDEXを保持
                                                 accessors[primitive["attributes"]["POSITION"]] = vertex_idx
@@ -164,6 +165,8 @@ class VrmReader(PmxReader):
                                         logger.debug(f'{midx}-{pidx}: start({pmx.vertices[primitive["material"]][0].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][:3]]}')
                                         logger.debug(f'{midx}-{pidx}: end({pmx.vertices[primitive["material"]][-1].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][-3:-1]]}')
                                     
+                hair_regexp = r'((F\d+_\d+_Hair_\d+)_HAIR_\d+)'
+
                 if "meshes" in vrm.json_data:
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
                         if "primitives" in mesh:
@@ -194,20 +197,23 @@ class VrmReader(PmxReader):
 
                                         # VRMの材質拡張情報
                                         material_ext = [m for m in vrm.json_data["extensions"]["VRM"]["materialProperties"] if m["name"] == vrm_material["name"]][0]
-
+                                        # 拡散色
                                         diffuse_color_data = vrm_material["pbrMetallicRoughness"]["baseColorFactor"]
                                         diffuse_color = MVector3D(diffuse_color_data[:3])
+                                        # 非透過度
                                         alpha = diffuse_color_data[3]
+                                        # 反射色
                                         if "emissiveFactor" in vrm_material:
                                             specular_color_data = vrm_material["emissiveFactor"]
                                             specular_color = MVector3D(specular_color_data[:3])
                                         else:
                                             specular_color = MVector3D()
                                         specular_factor = 0
-                                        if "vectorProperties" in material_ext:
+                                        # 環境色
+                                        if "vectorProperties" in material_ext and "_ShadeColor" in material_ext["vectorProperties"]:
                                             ambient_color = MVector3D(material_ext["vectorProperties"]["_ShadeColor"][:3])
                                         else:
-                                            ambient_color = MVector3D()
+                                            ambient_color = diffuse_color / 2
                                         # 0x02:地面影, 0x04:セルフシャドウマップへの描画, 0x08:セルフシャドウの描画
                                         flag = 0x02 | 0x04 | 0x08
                                         if vrm_material["doubleSided"]:
@@ -215,11 +221,69 @@ class VrmReader(PmxReader):
                                             flag |= 0x01
                                         edge_color = MVector4D(material_ext["vectorProperties"]["_OutlineColor"])
                                         edge_size = material_ext["floatProperties"]["_OutlineWidth"]
-                                        texture_index = vrm_material["pbrMetallicRoughness"]["baseColorTexture"]["index"] + 1
-                                        sphere_texture_index = 0
-                                        sphere_mode = 0
-                                        toon_sharing_flag = 1
-                                        toon_texture_index = 0
+
+                                        # 0番目は空テクスチャなので+1で設定
+                                        m = re.search(hair_regexp, vrm_material["name"])
+                                        if m is not None:
+                                            # 髪材質の場合、合成
+                                            hair_img_name = os.path.basename(pmx.textures[material_ext["textureProperties"]["_MainTex"] + 1])
+                                            hair_spe_name = f'{m.groups()[1]}_spe.png'
+                                            hair_blend_name = f'{m.groups()[0]}_blend.png'
+
+                                            if os.path.exists(os.path.join(tex_dir_path, hair_img_name)) and os.path.exists(os.path.join(tex_dir_path, hair_spe_name)):
+                                                # スペキュラファイルがある場合
+                                                hair_img = Image.open(os.path.join(tex_dir_path, hair_img_name))
+                                                hair_ary = np.array(hair_img)
+
+                                                spe_img = Image.open(os.path.join(tex_dir_path, hair_spe_name))
+                                                spe_ary = np.array(spe_img)
+
+                                                # 拡散色の画像
+                                                diffuse_ary = np.array(material_ext["vectorProperties"]["_Color"])
+                                                diffuse_img = Image.fromarray(np.tile(diffuse_ary * 255, (hair_ary.shape[0], hair_ary.shape[1], 1)).astype(np.uint8))
+                                                hair_diffuse_img = ImageChops.multiply(hair_img, diffuse_img)
+
+                                                # 反射色の画像
+                                                emissive_ary = np.array(vrm_material["emissiveFactor"])
+                                                emissive_ary = np.append(emissive_ary, 1)
+                                                emissive_img = Image.fromarray(np.tile(emissive_ary * 255, (spe_ary.shape[0], spe_ary.shape[1], 1)).astype(np.uint8))
+                                                hair_emissive_img = ImageChops.multiply(spe_img, emissive_img)
+
+                                                dest_img = ImageChops.screen(hair_diffuse_img, hair_emissive_img)
+                                                dest_img.save(os.path.join(tex_dir_path, hair_blend_name))
+
+                                                pmx.textures.append(os.path.join("tex", hair_blend_name))
+                                                texture_index = len(pmx.textures) - 1
+
+                                                # 拡散色と環境色は固定
+                                                diffuse_color = MVector3D(1, 1, 1)
+                                                ambient_color = diffuse_color / 2
+                                            else:
+                                                # スペキュラがない場合、ないし反映させない場合、そのまま設定
+                                                texture_index = material_ext["textureProperties"]["_MainTex"] + 1
+                                        else:
+                                            # そのまま出力
+                                            texture_index = material_ext["textureProperties"]["_MainTex"] + 1
+                                        sphere_texture_index = material_ext["textureProperties"]["_SphereAdd"] + 1
+                                        # 加算スフィア
+                                        sphere_mode = 2
+
+                                        if "vectorProperties" in material_ext and "_ShadeColor" in material_ext["vectorProperties"]:
+                                            toon_sharing_flag = 0
+                                            toon_img_name = f'{vrm_material["name"]}_TOON.bmp'
+                                            
+                                            toon_light_ary = np.tile(np.array([255, 255, 255, 255]), (24, 32, 1))
+                                            toon_shadow_ary = np.tile(np.array(material_ext["vectorProperties"]["_ShadeColor"]) * 255, (8, 32, 1))
+                                            toon_ary = np.concatenate((toon_light_ary, toon_shadow_ary), axis=0)
+                                            toon_img = Image.fromarray(toon_ary.astype(np.uint8))
+
+                                            toon_img.save(os.path.join(tex_dir_path, toon_img_name))
+                                            pmx.textures.append(os.path.join("tex", toon_img_name))
+                                            # 最後に追加したテクスチャをINDEXとして設定
+                                            toon_texture_index = len(pmx.textures) - 1
+                                        else:
+                                            toon_sharing_flag = 1
+                                            toon_texture_index = 1
 
                                         material = Material(vrm_material["name"], vrm_material["name"], diffuse_color, alpha, specular_factor, specular_color, \
                                                             ambient_color, flag, edge_color, edge_size, texture_index, sphere_texture_index, sphere_mode, toon_sharing_flag, \
@@ -234,6 +298,11 @@ class VrmReader(PmxReader):
                                         # 材質がある場合は、面数を加算する
                                         materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
 
+                if "nodes" in vrm.json_data:
+                    for nidx, node in enumerate(vrm.json_data["nodes"]):
+                        self.define_bone(vrm, pmx, nidx, -1)
+                logger.info(f'-- ボーンデータ解析[{len(pmx.bones.keys())}]')
+
                 # モデル名
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
 
@@ -242,8 +311,11 @@ class VrmReader(PmxReader):
                     if material_type in materials_by_type:
                         for material in materials_by_type[material_type].values():
                             pmx.materials[material.name] = material
-                            for index in indices_by_material[material.name]:
-                                pmx.indices.append(index)
+                            for midx in range(0, len(indices_by_material[material.name]), 3):
+                                # 面の貼り方がPMXは逆
+                                pmx.indices.append(indices_by_material[material.name][midx + 2])
+                                pmx.indices.append(indices_by_material[material.name][midx + 1])
+                                pmx.indices.append(indices_by_material[material.name][midx])
 
             return True
         except MKilledException as ke:
@@ -259,6 +331,73 @@ class VrmReader(PmxReader):
         
         return False
     
+    def define_bone(self, vrm: VrmModel, pmx: PmxModel, node_idx: int, parent_idx: int):
+        node = vrm.json_data["nodes"][node_idx]
+
+        if node["name"] in pmx.bones:
+            return
+
+        # 位置
+        position = MVector3D(node["translation"]) * MIKU_METER * MVector3D(-1, 1, 1)
+
+        if 0 < parent_idx:
+            position += pmx.bones[pmx.bone_indexes[parent_idx]].position
+
+        #  0x0001  : 接続先(PMD子ボーン指定)表示方法 -> 0:座標オフセットで指定 1:ボーンで指定
+        #  0x0002  : 回転可能
+        #  0x0004  : 移動可能
+        #  0x0008  : 表示
+        #  0x0010  : 操作可
+        flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+        bone = Bone(node["name"], node["name"], position, parent_idx, 0, flag)
+        pmx.bones[bone.name] = bone
+        pmx.bone_indexes[node_idx] = bone.name
+
+        if "children" in node:
+            # 子ボーンがある場合
+            for child_idx in node["children"]:
+                # 子ボーンを取得
+                self.define_bone(vrm, pmx, child_idx, node_idx)
+
+                # 表示先を設定(最初のボーン系子ども)
+                if pmx.bones[node["name"]].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].name and "Bip" in bone.name) or "Bip" not in bone.name):
+                    pmx.bones[node["name"]].tail_index = child_idx
+
+    # http://bttb.s1.valueserver.jp/wordpress/blog/2018/12/13/python_bitmap/
+    def write_toon_texture(self, color: MVector3D, toon_path: str):
+        with open(toon_path, "wb") as f:
+            # FILE_HEADER
+            b = bytearray([0x42, 0x4d])         # シグネチャ 'BM'
+            b.extend([0x00, 0x00, 0x00, 0x00])  # ファイルサイズ
+            b.extend([0x00, 0x00])              # 予約領域
+            b.extend([0x00, 0x00])              # 予約領域
+            b.extend([0x3e, 0x00, 0x00, 0x00])  # データ開始位置
+    
+            # INFO_HEADER
+            b.extend([0x28, 0x00, 0x00, 0x00])  # ヘッダーサイズ
+            b.extend([32, 0x00, 0x00, 0x00])    # 幅 = 32
+            b.extend([32, 0x00, 0x00, 0x00])    # 高さ = 32
+            b.extend([0x01, 0x00])              # 常に1
+            b.extend([0x08, 0x00])              # byte/1pixel(1byteを表すために必要なbit)
+            b.extend([0x00, 0x00, 0x00, 0x00])  # 圧縮なしは0
+            b.extend([0x00, 0x00, 0x00, 0x00])  # イメージサイズ
+            b.extend([0x00, 0x00, 0x00, 0x00])  # X方向解像度
+            b.extend([0x00, 0x00, 0x00, 0x00])  # Y方向解像度
+            b.extend([0x02, 0x00, 0x00, 0x00])  # 使用する色の数
+            b.extend([0x00, 0x00, 0x00, 0x00])  # 重要な色の数
+    
+            # COLOR_TABLES
+            b.extend([0xFF, 0xFF, 0xFF, 0x00])  # Blue, Green, Red, Reserved
+            b.extend([int(color.x() * 255), int(color.y() * 255), int(color.z() * 255), 0x00])  # Blue, Green, Red, Reserved
+    
+            # DATA
+            for _ in range(int(32 * 0.25)):
+                b.extend([0x01 for _ in range(32)])
+            for _ in range(int(32 * 0.75)):
+                b.extend([0x00 for _ in range(32)])
+            
+            f.write(b)
+                
     # アクセサの数を取得する
     def count_from_accessor(self, vrm: VrmModel, accessor_idx: int):
         if accessor_idx < len(vrm.json_data['accessors']):
@@ -296,10 +435,10 @@ class VrmReader(PmxReader):
                             # Vec3 / float
                             xresult = struct.unpack_from(buf_type, self.buffer, buf_start)
                             yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
-                            zresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num + buf_num)
+                            zresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 2))
 
                             bresult.append(MVector3D(float(xresult[0]), float(yresult[0]), float(zresult[0])))
-                        logger.info(f"-- -- Accessor[{accessor_idx}/Vec3/float]")
+                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec3/float]")
                             
                     elif acc_type == "VEC2":
                         buf_type = "f"
@@ -319,7 +458,29 @@ class VrmReader(PmxReader):
                             yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
 
                             bresult.append(MVector2D(float(xresult[0]), float(yresult[0])))
-                        logger.info(f"-- -- Accessor[{accessor_idx}/Vec2/float]")
+                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec2/float]")
+                            
+                    elif acc_type == "VEC4":
+                        buf_type = "f"
+                        buf_num = 4
+                        if int(accessor['componentType']) == 5126:
+                            buf_type = "f"
+                            buf_num = 4
+                        else:
+                            buf_type = "d"
+                            buf_num = 8
+
+                        for n in range(accessor['count']):
+                            buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 2) * n)
+
+                            # Vec3 / float
+                            xresult = struct.unpack_from(buf_type, self.buffer, buf_start)
+                            yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
+                            zresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 2))
+                            wresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 3))
+
+                            bresult.append(MVector4D(float(xresult[0]), float(yresult[0]), float(zresult[0]), float(wresult[0])))
+                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec4/float]")
                             
                     elif acc_type == "SCALAR":
                         buf_type = "I"
