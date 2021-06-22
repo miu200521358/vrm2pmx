@@ -297,6 +297,11 @@ class VrmReader(PmxReader):
                                     else:
                                         # 材質がある場合は、面数を加算する
                                         materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
+                
+                pmx.display_slots["Root"] = DisplaySlot("全ての親", "Root", 1, 0)
+                pmx.display_slots["Morph"] = DisplaySlot("表情", "Morph", 1, 1)
+                pmx.display_slots["Human"] = DisplaySlot("人体", "Human", 0, 0)
+                pmx.display_slots["Others"] = DisplaySlot("その他", "Others", 0, 0)
 
                 if "nodes" in vrm.json_data:
                     for nidx, node in enumerate(vrm.json_data["nodes"]):
@@ -333,8 +338,12 @@ class VrmReader(PmxReader):
     
     def define_bone(self, vrm: VrmModel, pmx: PmxModel, node_idx: int, parent_idx: int):
         node = vrm.json_data["nodes"][node_idx]
+        human_node = [b for b in vrm.json_data["extensions"]["VRM"]["humanoid"]["humanBones"] if b["node"] == node_idx]
+        # 人体ボーンの場合のみ人体データ取得
+        human_node = None if len(human_node) == 0 else human_node[0]
+        bone_name = human_node["bone"] if human_node else node["name"]
 
-        if node["name"] in pmx.bones:
+        if bone_name in pmx.bones:
             return
 
         # 位置
@@ -349,9 +358,20 @@ class VrmReader(PmxReader):
         #  0x0008  : 表示
         #  0x0010  : 操作可
         flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
-        bone = Bone(node["name"], node["name"], position, parent_idx, 0, flag)
+        bone = Bone(bone_name, bone_name, position, parent_idx, 0, flag)
         pmx.bones[bone.name] = bone
         pmx.bone_indexes[node_idx] = bone.name
+
+        # 表示枠
+        if bone_name == "Root":
+            if node_idx not in pmx.display_slots["Root"].references:
+                pmx.display_slots["Root"].references.append(node_idx)
+        elif human_node:
+            if node_idx not in pmx.display_slots["Human"].references:
+                pmx.display_slots["Human"].references.append(node_idx)
+        else:
+            if node_idx not in pmx.display_slots["Others"].references:
+                pmx.display_slots["Others"].references.append(node_idx)
 
         if "children" in node:
             # 子ボーンがある場合
@@ -360,8 +380,8 @@ class VrmReader(PmxReader):
                 self.define_bone(vrm, pmx, child_idx, node_idx)
 
                 # 表示先を設定(最初のボーン系子ども)
-                if pmx.bones[node["name"]].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].name and "Bip" in bone.name) or "Bip" not in bone.name):
-                    pmx.bones[node["name"]].tail_index = child_idx
+                if pmx.bones[bone_name].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].name and human_node) or not human_node):
+                    pmx.bones[bone_name].tail_index = child_idx
 
     # http://bttb.s1.valueserver.jp/wordpress/blog/2018/12/13/python_bitmap/
     def write_toon_texture(self, color: MVector3D, toon_path: str):

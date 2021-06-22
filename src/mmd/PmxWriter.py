@@ -221,6 +221,23 @@ class PmxWriter:
             # 表示枠の数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.display_slots.values()))))
 
+            for didx, display_slot in enumerate(pmx.display_slots.values()):
+                # ボーン名
+                self.write_text(fout, display_slot.name, f"Display {didx}")
+                self.write_text(fout, display_slot.english_name, f"Display {didx}")
+                # 特殊枠フラグ - 0:通常枠 1:特殊枠
+                fout.write(struct.pack(TYPE_BYTE, display_slot.special_flag))
+                # 枠内要素数
+                fout.write(struct.pack(TYPE_INT, len(display_slot.references)))
+                if display_slot.display_type == 0:
+                    # ボーンの場合
+                    for bone_idx in display_slot.references:
+                        # 要素対象 0:ボーン 1:モーフ
+                        fout.write(struct.pack(TYPE_BYTE, 0))
+                        # ボーンIndex
+                        fout.write(struct.pack(bone_idx_type, bone_idx))
+                # FIXME モーフ
+
             logger.info(f"-- 表示枠データ出力終了({len(list(pmx.display_slots.values()))})")
 
             # 剛体の数

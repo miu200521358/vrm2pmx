@@ -399,10 +399,11 @@ class Morph:
 
 # 表示枠構造-----------------------
 class DisplaySlot:
-    def __init__(self, name, english_name, special_flag, references=None):
+    def __init__(self, name, english_name, special_flag, display_type=0, references=None):
         self.name = name
         self.english_name = english_name
         self.special_flag = special_flag
+        self.display_type = display_type
         self.references = references or []
 
     def __str__(self):
