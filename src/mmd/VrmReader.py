@@ -128,11 +128,13 @@ class VrmReader(PmxReader):
                 vertex_idx = 0
                 pmx.indices = []
                 accessors = {}
+                materials_by_type = {}
+                indices_by_material = {}
 
                 if "meshes" in vrm.json_data:
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
                         if "primitives" in mesh:
-                            for pidx, primitive in enumerate(mesh["primitives"]):
+                            for pidx, primitive in enumerate(sorted(mesh["primitives"], key=lambda x: x["material"])):
                                 if "attributes" in primitive:
                                     # 頂点データ
                                     if primitive["attributes"]["POSITION"] not in accessors:
@@ -166,25 +168,30 @@ class VrmReader(PmxReader):
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
                         if "primitives" in mesh:
                             for pidx, primitive in enumerate(sorted(mesh["primitives"], key=lambda x: x["material"])):
-                                if "indices" in primitive:
-                                    # 面データ
-                                    indices = self.read_from_accessor(vrm, primitive["indices"])
-                                    for iidx, index in enumerate(indices):
-                                        vertex_idx = index + accessors[primitive["attributes"]["POSITION"]]
-                                        pmx.indices.append(vertex_idx)
-                                        
-                                        if iidx < 3 or iidx > len(indices) - 4:
-                                            logger.debug(f'{iidx}: {index} -> {vertex_idx}')
-
-                                    logger.info(f'-- 面データ解析[{primitive["indices"]}]')
-                                    logger.debug(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, {len(indices)}/{len(pmx.indices)}')
-
                                 if "material" in primitive and "materials" in vrm.json_data and primitive["material"] < len(vrm.json_data["materials"]):
                                     # 材質データ
                                     vrm_material = vrm.json_data["materials"][primitive["material"]]
                                     logger.debug(f'material: {primitive["material"]} -> {vrm_material["name"]}')
 
-                                    if vrm_material["name"] not in pmx.materials:
+                                    if "indices" in primitive:
+                                        # 面データ
+                                        indices = self.read_from_accessor(vrm, primitive["indices"])
+                                        for iidx, index in enumerate(indices):
+                                            vertex_idx = index + accessors[primitive["attributes"]["POSITION"]]
+                                            # 材質別に面を保持
+                                            if vrm_material["name"] not in indices_by_material:
+                                                indices_by_material[vrm_material["name"]] = []
+                                            indices_by_material[vrm_material["name"]].append(vertex_idx)
+                                            
+                                            if iidx < 3 or iidx > len(indices) - 4:
+                                                logger.debug(f'{iidx}: {index} -> {vertex_idx}')
+
+                                        logger.info(f'-- 面データ解析[{primitive["indices"]}]')
+                                        logger.debug(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, {len(indices)}/{len(indices_by_material[vrm_material["name"]])}')
+
+                                    if vrm_material["alphaMode"] not in materials_by_type or vrm_material["name"] not in materials_by_type[vrm_material["alphaMode"]]:
+                                        # 材質種別別に材質の存在がない場合
+
                                         # VRMの材質拡張情報
                                         material_ext = [m for m in vrm.json_data["extensions"]["VRM"]["materialProperties"] if m["name"] == vrm_material["name"]][0]
 
@@ -218,15 +225,25 @@ class VrmReader(PmxReader):
                                                             ambient_color, flag, edge_color, edge_size, texture_index, sphere_texture_index, sphere_mode, toon_sharing_flag, \
                                                             toon_texture_index, "", len(indices))
 
-                                        pmx.materials[vrm_material["name"]] = material
+                                        if vrm_material["alphaMode"] not in materials_by_type:
+                                            materials_by_type[vrm_material["alphaMode"]] = {}
+                                        materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]] = material
 
                                         logger.info(f'-- 材質データ解析[{vrm_material["name"]}]')
                                     else:
                                         # 材質がある場合は、面数を加算する
-                                        pmx.materials[vrm_material["name"]].vertex_count += len(indices)
+                                        materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
 
                 # モデル名
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
+
+                # 材質を不透明(OPAQUE)→透明順(BLEND)に並べ替て設定
+                for material_type in ["OPAQUE", "MASK", "BLEND"]:
+                    if material_type in materials_by_type:
+                        for material in materials_by_type[material_type].values():
+                            pmx.materials[material.name] = material
+                            for index in indices_by_material[material.name]:
+                                pmx.indices.append(index)
 
             return True
         except MKilledException as ke:
