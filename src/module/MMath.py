@@ -46,7 +46,7 @@ class MVector2D:
         elif isinstance(x, MVector2D):
             # クラスの場合
             self.__data = np.array([x.x(), x.y()], dtype=np.float64)
-        elif isinstance(x, np.ndarray):
+        elif isinstance(x, np.ndarray) or isinstance(x, list):
             # arrayそのものの場合
             self.__data = np.array([x[0], x[1]], dtype=np.float64)
         else:
@@ -298,7 +298,7 @@ class MVector3D:
         elif isinstance(x, MVector3D):
             # クラスの場合
             self.__data = np.array([x.x(), x.y(), x.z()], dtype=np.float64)
-        elif isinstance(x, np.ndarray):
+        elif isinstance(x, np.ndarray) or isinstance(x, list):
             # arrayそのものの場合
             self.__data = np.array([x[0], x[1], x[2]], dtype=np.float64)
         else:
@@ -648,7 +648,7 @@ class MVector4D:
         elif isinstance(x, MVector4D):
             # クラスの場合
             self.__data = np.array([x.x(), x.y(), x.z(), x.w()], dtype=np.float64)
-        elif isinstance(x, np.ndarray):
+        elif isinstance(x, np.ndarray) or isinstance(x, list):
             # 行列そのものの場合
             self.__data = np.array([x[0], x[1], x[2], x[3]], dtype=np.float64)
         else:

@@ -58,6 +58,12 @@ class ExportPanel(BasePanel):
         self.export_btn_ctrl.Bind(wx.EVT_LEFT_DCLICK, self.on_doubleclick)
         btn_sizer.Add(self.export_btn_ctrl, 0, wx.ALL, 5)
 
+        # 多段分割変換実行ボタン
+        self.validate_btn_ctrl = wx.Button(self, wx.ID_ANY, u"PMX読み込み", wx.DefaultPosition, wx.Size(200, 50), 0)
+        self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DOWN, self.on_validate)
+        self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DCLICK, self.on_doubleclick)
+        btn_sizer.Add(self.validate_btn_ctrl, 0, wx.ALL, 5)
+
         self.sizer.Add(btn_sizer, 0, wx.ALIGN_CENTER | wx.SHAPED, 5)
 
         # コンソール
@@ -110,6 +116,9 @@ class ExportPanel(BasePanel):
         logger.warning("ダブルクリックされました。", decoration=MLogger.DECORATION_BOX)
         event.Skip(False)
         return False
+    
+    def on_validate(self, event: wx.Event):
+        self.output_pmx_file_ctrl.load()
     
     # 多段分割変換
     def on_convert_export(self, event: wx.Event):
