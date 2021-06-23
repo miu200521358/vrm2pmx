@@ -132,10 +132,20 @@ class VrmReader(PmxReader):
                 materials_by_type = {}
                 indices_by_material = {}
 
+                pmx.display_slots["Root"] = DisplaySlot("全ての親", "Root", 1, 0)
+                pmx.display_slots["Morph"] = DisplaySlot("表情", "Morph", 1, 1)
+                pmx.display_slots["Human"] = DisplaySlot("人体", "Human", 0, 0)
+                pmx.display_slots["Others"] = DisplaySlot("その他", "Others", 0, 0)
+
+                if "nodes" in vrm.json_data:
+                    for nidx, node in enumerate(vrm.json_data["nodes"]):
+                        self.define_bone(vrm, pmx, nidx, -1)
+                logger.info(f'-- ボーンデータ解析[{len(pmx.bones.keys())}]')
+
                 if "meshes" in vrm.json_data:
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
                         if "primitives" in mesh:
-                            for pidx, primitive in enumerate(sorted(mesh["primitives"], key=lambda x: x["material"])):
+                            for pidx, primitive in enumerate(mesh["primitives"]):
                                 if "attributes" in primitive:
                                     # 頂点データ
                                     if primitive["attributes"]["POSITION"] not in accessors:
@@ -147,9 +157,39 @@ class VrmReader(PmxReader):
 
                                         # UVデータ
                                         uvs = self.read_from_accessor(vrm, primitive["attributes"]["TEXCOORD_0"])
+
+                                        # ジョイントデータ(MMDのジョイントとは異なる)
+                                        joints = self.read_from_accessor(vrm, primitive["attributes"]["JOINTS_0"])
                                         
-                                        for vidx, (position, normal, uv) in enumerate(zip(positions, normals, uvs)):
-                                            vertex = Vertex(vertex_idx, position * MIKU_METER * MVector3D(-1, 1, 1), normal * MVector3D(-1, 1, 1), uv, None, Bdef1(1), 1)
+                                        # ウェイトデータ
+                                        weights = self.read_from_accessor(vrm, primitive["attributes"]["WEIGHTS_0"])
+
+                                        # # 対応するジョイントデータ
+                                        skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
+                                        
+                                        for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
+                                            # deform = Bdef4(joint.x(), joint.y(), joint.z(), joint.w(), weight.x(), weight.y(), weight.z(), weight.w())
+                                            # 念のため正規化
+                                            weight.normalize()
+                                            # 0ではない値が入っているINDEX
+                                            valiable_joints = np.where(joint.data() > 0)[0].tolist()
+                                            if len(valiable_joints) > 1:
+                                                if len(valiable_joints) == 2:
+                                                    # ウェイトが2つの場合、Bdef2
+                                                    joint_idxs = joint.data()[valiable_joints].astype(np.int)
+                                                    weight_values = weight.data()[valiable_joints]
+                                                    deform = Bdef2(skin_joints[joint_idxs[0]], skin_joints[joint_idxs[1]], weight_values[0])
+                                                else:
+                                                    # それ以上の場合、Bdef4
+                                                    joint_idxs = joint.data().astype(np.int)
+                                                    deform = Bdef4(skin_joints[joint_idxs[0]], skin_joints[joint_idxs[1]], skin_joints[joint_idxs[2]], skin_joints[joint_idxs[3]], \
+                                                                   weight.x(), weight.y(), weight.z(), weight.w())
+                                            else:
+                                                # ウェイトが1つのみの場合、Bdef1
+                                                joint_idxs = joint.data()[valiable_joints].astype(np.int)
+                                                deform = Bdef1(skin_joints[joint_idxs[0]])
+
+                                            vertex = Vertex(vertex_idx, position * MIKU_METER * MVector3D(-1, 1, 1), normal * MVector3D(-1, 1, 1), uv, None, deform, 1)
                                             if vidx == 0:
                                                 # ブロック毎の開始頂点INDEXを保持
                                                 accessors[primitive["attributes"]["POSITION"]] = vertex_idx
@@ -298,16 +338,6 @@ class VrmReader(PmxReader):
                                         # 材質がある場合は、面数を加算する
                                         materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
                 
-                pmx.display_slots["Root"] = DisplaySlot("全ての親", "Root", 1, 0)
-                pmx.display_slots["Morph"] = DisplaySlot("表情", "Morph", 1, 1)
-                pmx.display_slots["Human"] = DisplaySlot("人体", "Human", 0, 0)
-                pmx.display_slots["Others"] = DisplaySlot("その他", "Others", 0, 0)
-
-                if "nodes" in vrm.json_data:
-                    for nidx, node in enumerate(vrm.json_data["nodes"]):
-                        self.define_bone(vrm, pmx, nidx, -1)
-                logger.info(f'-- ボーンデータ解析[{len(pmx.bones.keys())}]')
-
                 # モデル名
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
 
@@ -338,9 +368,9 @@ class VrmReader(PmxReader):
     
     def define_bone(self, vrm: VrmModel, pmx: PmxModel, node_idx: int, parent_idx: int):
         node = vrm.json_data["nodes"][node_idx]
-        human_node = [b for b in vrm.json_data["extensions"]["VRM"]["humanoid"]["humanBones"] if b["node"] == node_idx]
+        human_nodes = [b for b in vrm.json_data["extensions"]["VRM"]["humanoid"]["humanBones"] if b["node"] == node_idx]
         # 人体ボーンの場合のみ人体データ取得
-        human_node = None if len(human_node) == 0 else human_node[0]
+        human_node = None if len(human_nodes) == 0 else human_nodes[0]
         bone_name = human_node["bone"] if human_node else node["name"]
 
         if bone_name in pmx.bones:
@@ -358,7 +388,7 @@ class VrmReader(PmxReader):
         #  0x0008  : 表示
         #  0x0010  : 操作可
         flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
-        bone = Bone(bone_name, bone_name, position, parent_idx, 0, flag)
+        bone = Bone(bone_name, node["name"], position, parent_idx, 0, flag)
         pmx.bones[bone.name] = bone
         pmx.bone_indexes[node_idx] = bone.name
 
@@ -369,7 +399,8 @@ class VrmReader(PmxReader):
         elif human_node:
             if node_idx not in pmx.display_slots["Human"].references:
                 pmx.display_slots["Human"].references.append(node_idx)
-        else:
+        elif "mesh" not in node:
+            # meshの割り当て用ボーンは表示枠には入れない
             if node_idx not in pmx.display_slots["Others"].references:
                 pmx.display_slots["Others"].references.append(node_idx)
 
@@ -380,44 +411,9 @@ class VrmReader(PmxReader):
                 self.define_bone(vrm, pmx, child_idx, node_idx)
 
                 # 表示先を設定(最初のボーン系子ども)
-                if pmx.bones[bone_name].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].name and human_node) or not human_node):
+                if pmx.bones[bone_name].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].english_name and "Bip" in bone.english_name) or "Bip" not in bone.english_name):
                     pmx.bones[bone_name].tail_index = child_idx
 
-    # http://bttb.s1.valueserver.jp/wordpress/blog/2018/12/13/python_bitmap/
-    def write_toon_texture(self, color: MVector3D, toon_path: str):
-        with open(toon_path, "wb") as f:
-            # FILE_HEADER
-            b = bytearray([0x42, 0x4d])         # シグネチャ 'BM'
-            b.extend([0x00, 0x00, 0x00, 0x00])  # ファイルサイズ
-            b.extend([0x00, 0x00])              # 予約領域
-            b.extend([0x00, 0x00])              # 予約領域
-            b.extend([0x3e, 0x00, 0x00, 0x00])  # データ開始位置
-    
-            # INFO_HEADER
-            b.extend([0x28, 0x00, 0x00, 0x00])  # ヘッダーサイズ
-            b.extend([32, 0x00, 0x00, 0x00])    # 幅 = 32
-            b.extend([32, 0x00, 0x00, 0x00])    # 高さ = 32
-            b.extend([0x01, 0x00])              # 常に1
-            b.extend([0x08, 0x00])              # byte/1pixel(1byteを表すために必要なbit)
-            b.extend([0x00, 0x00, 0x00, 0x00])  # 圧縮なしは0
-            b.extend([0x00, 0x00, 0x00, 0x00])  # イメージサイズ
-            b.extend([0x00, 0x00, 0x00, 0x00])  # X方向解像度
-            b.extend([0x00, 0x00, 0x00, 0x00])  # Y方向解像度
-            b.extend([0x02, 0x00, 0x00, 0x00])  # 使用する色の数
-            b.extend([0x00, 0x00, 0x00, 0x00])  # 重要な色の数
-    
-            # COLOR_TABLES
-            b.extend([0xFF, 0xFF, 0xFF, 0x00])  # Blue, Green, Red, Reserved
-            b.extend([int(color.x() * 255), int(color.y() * 255), int(color.z() * 255), 0x00])  # Blue, Green, Red, Reserved
-    
-            # DATA
-            for _ in range(int(32 * 0.25)):
-                b.extend([0x01 for _ in range(32)])
-            for _ in range(int(32 * 0.75)):
-                b.extend([0x00 for _ in range(32)])
-            
-            f.write(b)
-                
     # アクセサの数を取得する
     def count_from_accessor(self, vrm: VrmModel, accessor_idx: int):
         if accessor_idx < len(vrm.json_data['accessors']):
@@ -436,18 +432,11 @@ class VrmReader(PmxReader):
             acc_type = accessor['type']
             if accessor['bufferView'] < len(vrm.json_data['bufferViews']):
                 buffer = vrm.json_data['bufferViews'][accessor['bufferView']]
-                logger.debug(f'accessor: {accessor_idx}, {buffer}')
+                logger.debug('accessor: %s, %s', accessor_idx, buffer)
                 if 'count' in accessor:
                     bresult = []
                     if acc_type == "VEC3":
-                        buf_type = "f"
-                        buf_num = 4
-                        if int(accessor['componentType']) == 5126:
-                            buf_type = "f"
-                            buf_num = 4
-                        else:
-                            buf_type = "d"
-                            buf_num = 8
+                        buf_type, buf_num = self.define_buf_type(accessor['componentType'])
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 3) * n)
@@ -457,18 +446,14 @@ class VrmReader(PmxReader):
                             yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
                             zresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 2))
 
-                            bresult.append(MVector3D(float(xresult[0]), float(yresult[0]), float(zresult[0])))
-                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec3/float]")
+                            if buf_type == "f":
+                                bresult.append(MVector3D(float(xresult[0]), float(yresult[0]), float(zresult[0])))
+                            else:
+                                bresult.append(MVector3D(int(xresult[0]), int(yresult[0]), int(zresult[0])))
+                        logger.debug("-- -- Accessor[%s/Vec3/%s]", accessor_idx, buf_type)
                             
                     elif acc_type == "VEC2":
-                        buf_type = "f"
-                        buf_num = 4
-                        if int(accessor['componentType']) == 5126:
-                            buf_type = "f"
-                            buf_num = 4
-                        else:
-                            buf_type = "d"
-                            buf_num = 8
+                        buf_type, buf_num = self.define_buf_type(accessor['componentType'])
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 2) * n)
@@ -478,20 +463,13 @@ class VrmReader(PmxReader):
                             yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
 
                             bresult.append(MVector2D(float(xresult[0]), float(yresult[0])))
-                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec2/float]")
+                        logger.debug("-- -- Accessor[%s/Vec3/%s]", accessor_idx, buf_type)
                             
                     elif acc_type == "VEC4":
-                        buf_type = "f"
-                        buf_num = 4
-                        if int(accessor['componentType']) == 5126:
-                            buf_type = "f"
-                            buf_num = 4
-                        else:
-                            buf_type = "d"
-                            buf_num = 8
+                        buf_type, buf_num = self.define_buf_type(accessor['componentType'])
 
                         for n in range(accessor['count']):
-                            buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 2) * n)
+                            buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 4) * n)
 
                             # Vec3 / float
                             xresult = struct.unpack_from(buf_type, self.buffer, buf_start)
@@ -499,29 +477,42 @@ class VrmReader(PmxReader):
                             zresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 2))
                             wresult = struct.unpack_from(buf_type, self.buffer, buf_start + (buf_num * 3))
 
-                            bresult.append(MVector4D(float(xresult[0]), float(yresult[0]), float(zresult[0]), float(wresult[0])))
-                        logger.debug(f"-- -- Accessor[{accessor_idx}/Vec4/float]")
+                            if buf_type == "f":
+                                bresult.append(MVector4D(float(xresult[0]), float(yresult[0]), float(zresult[0]), float(wresult[0])))
+                            else:
+                                bresult.append(MVector4D(int(xresult[0]), int(yresult[0]), int(zresult[0]), int(wresult[0])))
+                        logger.debug("-- -- Accessor[%s/Vec4/%s]", accessor_idx, buf_type)
                             
                     elif acc_type == "SCALAR":
-                        buf_type = "I"
-                        buf_num = 4
-                        if int(accessor['componentType']) == 5125:
-                            buf_type = "I"
-                            buf_num = 4
-                        elif int(accessor['componentType']) == 5123:
-                            buf_type = "H"
-                            buf_num = 2
-                        else:
-                            buf_type = "B"
-                            buf_num = 1
+                        buf_type, buf_num = self.define_buf_type(accessor['componentType'])
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + (buf_num * n)
                             xresult = struct.unpack_from(buf_type, self.buffer, buf_start)
 
-                            bresult.append(int(xresult[0]))
+                            if buf_type == "f":
+                                bresult.append(float(xresult[0]))
+                            else:
+                                bresult.append(int(xresult[0]))
+                        logger.debug("-- -- Accessor[%s/Scalar/%s]", accessor_idx, buf_type)
 
         return bresult
+
+    def define_buf_type(self, componentType: int):
+        if componentType == 5120:
+            return "b", 1
+        elif componentType == 5121:
+            return "B", 1
+        elif componentType == 5122:
+            return "h", 2
+        elif componentType == 5123:
+            return "H", 2
+        elif componentType == 5124:
+            return "i", 4
+        elif componentType == 5125:
+            return "I", 4
+        
+        return "f", 4
     
     def read_text(self, format_size):
         bresult = self.unpack(format_size, "{0}s".format(format_size))

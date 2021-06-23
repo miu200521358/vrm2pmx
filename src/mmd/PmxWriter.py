@@ -92,18 +92,18 @@ class PmxWriter:
                     # deform
                     if type(vertex.deform) is Bdef1:
                         fout.write(struct.pack(TYPE_BYTE, 0))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index0))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
                     elif type(vertex.deform) is Bdef2:
                         fout.write(struct.pack(TYPE_BYTE, 1))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index0))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index1))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index1)))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight0))
                     elif type(vertex.deform) is Bdef4:
                         fout.write(struct.pack(TYPE_BYTE, 2))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index0))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index1))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index2))
-                        fout.write(struct.pack(bone_idx_unsigned_type, vertex.deform.index3))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index1)))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index2)))
+                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index3)))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight0))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight1))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight2))
