@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import numpy as np
 import re
+import math
 
 from mmd.VrmData import VrmModel # noqa
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
@@ -39,6 +40,7 @@ class VrmReader(PmxReader):
         self.is_check = is_check
         self.offset = 0
         self.buffer = None
+        self.bone_pairs = {}
 
     def read_model_name(self):
         return ""
@@ -67,8 +69,10 @@ class VrmReader(PmxReader):
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
     
-    def convert_glTF(self, vrm: VrmModel, pmx: PmxModel, output_pmx_path: str):
+    def convert_glTF(self, vrm: VrmModel, pmx: PmxModel, output_pmx_path: str, bone_pairs: dict):
         try:
+            self.bone_pairs = bone_pairs
+
             # テクスチャ用ディレクトリ
             tex_dir_path = os.path.join(str(Path(output_pmx_path).resolve().parents[0]), "tex")
             os.makedirs(tex_dir_path, exist_ok=True)
@@ -132,14 +136,118 @@ class VrmReader(PmxReader):
                 materials_by_type = {}
                 indices_by_material = {}
 
-                pmx.display_slots["Root"] = DisplaySlot("全ての親", "Root", 1, 0)
-                pmx.display_slots["Morph"] = DisplaySlot("表情", "Morph", 1, 1)
-                pmx.display_slots["Human"] = DisplaySlot("人体", "Human", 0, 0)
-                pmx.display_slots["Others"] = DisplaySlot("その他", "Others", 0, 0)
-
                 if "nodes" in vrm.json_data:
                     for nidx, node in enumerate(vrm.json_data["nodes"]):
                         self.define_bone(vrm, pmx, nidx, -1)
+                
+                # 全ての親とかMMD用ボーン調整
+                bone_idx_offset = 0
+                if "全ての親" in pmx.bones and pmx.bones["全ての親"].index > 0 and "センター" in pmx.bones and "上半身" in pmx.bones:
+                    bone_idx_offset = pmx.bones["全ての親"].index
+                    for bidx in range(bone_idx_offset):
+                        # 全ての親より上を削除
+                        del pmx.bones[pmx.bone_indexes[bidx]]
+                    for bone in pmx.bones.values():
+                        # 全ての親を上に動かした分をオフセット
+                        bone.index -= bone_idx_offset
+                        if bone.parent_index >= 0:
+                            bone.parent_index -= bone_idx_offset
+                        if bone.tail_index >= 0:
+                            bone.tail_index -= bone_idx_offset
+                    # 全ての親
+                    pmx.bones["全ての親"].tail_index = pmx.bones["センター"].index
+                    # センター
+                    pmx.bones["センター"].parent_index = pmx.bones["全ての親"].index
+                    pmx.bones["センター"].position.setY((pmx.bones["左足"].position.y() + pmx.bones["左ひざ"].position.y()) / 2)
+                    pmx.bones["センター"].tail_index = -1
+                    pmx.bones["センター"].tail_position = MVector3D(0, -pmx.bones["センター"].position.y(), 0)
+                    pmx.bones["センター"].flag = 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+                    # 上半身
+                    pmx.bones["上半身"].parent_index = pmx.bones["センター"].index
+                
+                # 下半身の作成
+                if "下半身" in pmx.bones and "下半身2" in pmx.bones:
+                    # 0x0080  : ローカル付与 | 付与対象 0:ユーザー変形値／IKリンク／多重付与 1:親のローカル変形量
+                    # 0x0100  : 回転付与
+                    pmx.bones["下半身2"].flag |= 0x0081 | 0x0100
+                    pmx.bones["下半身2"].effect_index = pmx.bones["下半身"].index
+                    pmx.bones["下半身2"].effect_factor = 0.7
+                
+                # 足首の表示先はつま先
+                if "右足首" in pmx.bones and "右つま先" in pmx.bones:
+                    pmx.bones["右つま先"].parent_index = pmx.bones["右足首"].index
+                    pmx.bones["右足首"].tail_index = pmx.bones["右つま先"].index
+                if "左足首" in pmx.bones and "左つま先" in pmx.bones:
+                    pmx.bones["左つま先"].parent_index = pmx.bones["左足首"].index
+                    pmx.bones["左足首"].tail_index = pmx.bones["左つま先"].index
+                if "rightToes" in pmx.bones:
+                    pmx.bones["rightToes"].parent_index = -1
+                    pmx.bones["rightToes"].tail_index = -1
+                if "leftToes" in pmx.bones:
+                    pmx.bones["leftToes"].parent_index = -1
+                    pmx.bones["leftToes"].tail_index = -1
+                
+                # 足IK
+                self.create_leg_ik(pmx, "右")
+                self.create_leg_ik(pmx, "左")
+                
+                # 表示枠
+                pmx.display_slots["Root"] = DisplaySlot("全ての親", "Root", 1, 0)
+                pmx.display_slots["Root"].references.append(pmx.bones["全ての親"].index)
+                pmx.display_slots["Morph"] = DisplaySlot("表情", "Morph", 1, 1)
+                pmx.display_slots["Center"] = DisplaySlot("センター", "Center", 0, 0)
+                pmx.display_slots["Center"].references.append(pmx.bones["センター"].index)
+                pmx.display_slots["Trunk"] = DisplaySlot("体幹", "Trunk", 0, 0)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["頭"].index)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["首"].index)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["上半身2"].index)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["上半身"].index)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["下半身2"].index)
+                pmx.display_slots["Trunk"].references.append(pmx.bones["下半身"].index)
+                pmx.display_slots["LeftLeg"] = DisplaySlot("左足", "LeftLeg", 0, 0)
+                pmx.display_slots["LeftLeg"].references.append(pmx.bones["左足"].index)
+                pmx.display_slots["LeftLeg"].references.append(pmx.bones["左ひざ"].index)
+                pmx.display_slots["LeftLeg"].references.append(pmx.bones["左足首"].index)
+                pmx.display_slots["LeftLeg"].references.append(pmx.bones["左足ＩＫ"].index)
+                pmx.display_slots["LeftLeg"].references.append(pmx.bones["左つま先ＩＫ"].index)
+                pmx.display_slots["RightLeg"] = DisplaySlot("右足", "RightLeg", 0, 0)
+                pmx.display_slots["RightLeg"].references.append(pmx.bones["右足"].index)
+                pmx.display_slots["RightLeg"].references.append(pmx.bones["右ひざ"].index)
+                pmx.display_slots["RightLeg"].references.append(pmx.bones["右足首"].index)
+                pmx.display_slots["RightLeg"].references.append(pmx.bones["右足ＩＫ"].index)
+                pmx.display_slots["RightLeg"].references.append(pmx.bones["右つま先ＩＫ"].index)
+                pmx.display_slots["LeftHand"] = DisplaySlot("左手", "LeftHand", 0, 0)
+                pmx.display_slots["LeftHand"].references.append(pmx.bones["左肩"].index)
+                pmx.display_slots["LeftHand"].references.append(pmx.bones["左腕"].index)
+                pmx.display_slots["LeftHand"].references.append(pmx.bones["左ひじ"].index)
+                pmx.display_slots["LeftHand"].references.append(pmx.bones["左手首"].index)
+                pmx.display_slots["RightHand"] = DisplaySlot("右手", "RightHand", 0, 0)
+                pmx.display_slots["RightHand"].references.append(pmx.bones["右肩"].index)
+                pmx.display_slots["RightHand"].references.append(pmx.bones["右腕"].index)
+                pmx.display_slots["RightHand"].references.append(pmx.bones["右ひじ"].index)
+                pmx.display_slots["RightHand"].references.append(pmx.bones["右手首"].index)
+                pmx.display_slots["LeftFinger"] = DisplaySlot("左指", "LeftFinger", 0, 0)
+                for bone in pmx.bones.values():
+                    if bone.name[0] == "左" and bone.name[-2:-1] == "指" and bone.getManipulatable():
+                        pmx.display_slots["LeftFinger"].references.append(bone.index)
+                pmx.display_slots["RightFinger"] = DisplaySlot("右指", "RightFinger", 0, 0)
+                for bone in pmx.bones.values():
+                    if bone.name[0] == "右" and bone.name[-2:-1] == "指" and bone.getManipulatable():
+                        pmx.display_slots["RightFinger"].references.append(bone.index)
+                pmx.display_slots["Face"] = DisplaySlot("顔", "Face", 0, 0)
+                pmx.display_slots["Face"].references.append(pmx.bones["左目"].index)
+                pmx.display_slots["Face"].references.append(pmx.bones["右目"].index)
+                pmx.display_slots["Others"] = DisplaySlot("その他", "Others", 0, 0)
+                for bone in pmx.bones.values():
+                    if bone.getManipulatable():
+                        is_add = True
+                        for ds in pmx.display_slots.values():
+                            if bone.index in ds.references:
+                                is_add = False
+                                break
+                    if is_add:
+                        pmx.display_slots["Others"].references.append(bone.index)
+
                 logger.info(f'-- ボーンデータ解析[{len(pmx.bones.keys())}]')
 
                 if "meshes" in vrm.json_data:
@@ -168,26 +276,19 @@ class VrmReader(PmxReader):
                                         skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
                                         
                                         for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
-                                            # deform = Bdef4(joint.x(), joint.y(), joint.z(), joint.w(), weight.x(), weight.y(), weight.z(), weight.w())
-                                            # 念のため正規化
-                                            weight.normalize()
-                                            # 0ではない値が入っているINDEX
-                                            valiable_joints = np.where(joint.data() > 0)[0].tolist()
-                                            if len(valiable_joints) > 1:
-                                                if len(valiable_joints) == 2:
+                                            # 有効なINDEX番号と実際のボーンINDEXを取得
+                                            valiable_joints, joint_idxs, weight_values = self.get_deform_index(pmx, joint, skin_joints, bone_idx_offset, weight)
+                                            if len(joint_idxs) > 1:
+                                                if len(joint_idxs) == 2:
                                                     # ウェイトが2つの場合、Bdef2
-                                                    joint_idxs = joint.data()[valiable_joints].astype(np.int)
-                                                    weight_values = weight.data()[valiable_joints]
-                                                    deform = Bdef2(skin_joints[joint_idxs[0]], skin_joints[joint_idxs[1]], weight_values[0])
+                                                    deform = Bdef2(joint_idxs[0], joint_idxs[1], weight_values[0])
                                                 else:
                                                     # それ以上の場合、Bdef4
-                                                    joint_idxs = joint.data().astype(np.int)
-                                                    deform = Bdef4(skin_joints[joint_idxs[0]], skin_joints[joint_idxs[1]], skin_joints[joint_idxs[2]], skin_joints[joint_idxs[3]], \
-                                                                   weight.x(), weight.y(), weight.z(), weight.w())
+                                                    deform = Bdef4(joint_idxs[0], joint_idxs[1], joint_idxs[2], joint_idxs[3], \
+                                                                   weight_values[0], weight_values[1], weight_values[2], weight_values[3])
                                             else:
                                                 # ウェイトが1つのみの場合、Bdef1
-                                                joint_idxs = joint.data()[valiable_joints].astype(np.int)
-                                                deform = Bdef1(skin_joints[joint_idxs[0]])
+                                                deform = Bdef1(joint_idxs[0])
 
                                             vertex = Vertex(vertex_idx, position * MIKU_METER * MVector3D(-1, 1, 1), normal * MVector3D(-1, 1, 1), uv, None, deform, 1)
                                             if vidx == 0:
@@ -364,7 +465,65 @@ class VrmReader(PmxReader):
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
         
-        return False
+    def create_leg_ik(self, pmx: PmxModel, direction: str):
+        leg_name = f'{direction}足'
+        knee_name = f'{direction}ひざ'
+        ankle_name = f'{direction}足首'
+        toe_name = f'{direction}つま先'
+        leg_ik_name = f'{direction}足ＩＫ'
+        toe_ik_name = f'{direction}つま先ＩＫ'
+
+        if leg_name in pmx.bones and knee_name in pmx.bones and ankle_name in pmx.bones:
+            # 足ＩＫ
+            flag = 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0x0020
+            leg_ik_link = []
+            leg_ik_link.append(IkLink(pmx.bones[knee_name].index, 1, MVector3D(math.radians(-180), 0, 0), MVector3D(math.radians(-0.5), 0, 0)))
+            leg_ik_link.append(IkLink(pmx.bones[leg_name].index, 0))
+            leg_ik = Ik(pmx.bones[ankle_name].index, 40, 2, leg_ik_link)
+            leg_ik_bone = Bone(leg_ik_name, leg_ik_name, pmx.bones[ankle_name].position, pmx.bones["全ての親"].index, 1, flag, MVector3D(0, 0, 1), ik=leg_ik)
+            leg_ik_bone.index = len(pmx.bones)
+            pmx.bones[leg_ik_bone.name] = leg_ik_bone
+
+            toe_ik_link = []
+            toe_ik_link.append(IkLink(pmx.bones[ankle_name].index, 0))
+            toe_ik = Ik(pmx.bones[toe_name].index, 3, 4, toe_ik_link)
+            toe_ik_bone = Bone(toe_ik_name, toe_ik_name, pmx.bones[toe_name].position, pmx.bones[leg_ik_bone.name].index, 1, flag, MVector3D(0, -1, 0), ik=toe_ik)
+            toe_ik_bone.index = len(pmx.bones)
+            pmx.bones[toe_ik_bone.name] = toe_ik_bone
+    
+    def get_deform_index(self, pmx: PmxModel, joint: list, skin_joints: list, bone_idx_offset: int, org_weight: list):
+        # まずは0じゃないデータ（何かしら有効なボーンINDEXがあるリスト）
+        valiable_joints = np.where(joint.data() > 0)[0].tolist()
+        # ジョイント添え字からジョイントINDEXを取得(floatになってるのでint)
+        org_joint_idxs = joint.data()[valiable_joints].astype(np.int)
+        # オフセットを加味したジョイント
+        dest_joints = np.array(skin_joints)[org_joint_idxs] - bone_idx_offset
+
+        # 足先EXに相当する箇所なので、足首に載せ替える
+        right_joints = np.where(dest_joints == pmx.bones["rightToes"].index, pmx.bones["右足首"].index, dest_joints)
+        target_joints = np.where(right_joints == pmx.bones["leftToes"].index, pmx.bones["左足首"].index, right_joints)
+
+        # 有効なウェイト値
+        target_weights = org_weight.data()[valiable_joints]
+
+        # 足首を載せ替えた事で、ジョイントが重複している場合があるので、調整する
+        joint_weights = {}
+        for j, w in zip(target_joints, target_weights):
+            if j not in joint_weights:
+                joint_weights[j] = 0
+            joint_weights[j] += w
+
+        # 対象となるウェイト値
+        joint_values = list(joint_weights.keys())
+        # 正規化(合計して1になるように)
+        total_weights = np.array(list(joint_weights.values()))
+        weight_values = (total_weights / total_weights.sum(axis=0, keepdims=1)).tolist()
+
+        if len(joint_values) == 3:
+            # 3つの場合、0を入れ込む
+            return valiable_joints, joint_values + [0], weight_values + [0]
+
+        return valiable_joints, joint_values, weight_values
     
     def define_bone(self, vrm: VrmModel, pmx: PmxModel, node_idx: int, parent_idx: int):
         node = vrm.json_data["nodes"][node_idx]
@@ -372,8 +531,9 @@ class VrmReader(PmxReader):
         # 人体ボーンの場合のみ人体データ取得
         human_node = None if len(human_nodes) == 0 else human_nodes[0]
         bone_name = human_node["bone"] if human_node else node["name"]
+        jp_bone_name = self.bone_pairs[bone_name] if bone_name in self.bone_pairs else bone_name
 
-        if bone_name in pmx.bones:
+        if jp_bone_name in pmx.bones:
             return
 
         # 位置
@@ -387,22 +547,22 @@ class VrmReader(PmxReader):
         #  0x0004  : 移動可能
         #  0x0008  : 表示
         #  0x0010  : 操作可
-        flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
-        bone = Bone(bone_name, node["name"], position, parent_idx, 0, flag)
+        if bone_name in self.bone_pairs:
+            if jp_bone_name.endswith("先"):
+                flag = 0x0001 | 0x0002
+            elif jp_bone_name in ["全ての親", "センター"]:
+                flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+            else:
+                flag = 0x0001 | 0x0002 | 0x0008 | 0x0010
+        elif human_node or "mesh" in node:
+            flag = 0x0001 | 0x0002 | 0x0004
+        else:
+            flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+
+        bone = Bone(jp_bone_name, node["name"], position, parent_idx, 0, flag)
+        bone.index = node_idx
         pmx.bones[bone.name] = bone
         pmx.bone_indexes[node_idx] = bone.name
-
-        # 表示枠
-        if bone_name == "Root":
-            if node_idx not in pmx.display_slots["Root"].references:
-                pmx.display_slots["Root"].references.append(node_idx)
-        elif human_node:
-            if node_idx not in pmx.display_slots["Human"].references:
-                pmx.display_slots["Human"].references.append(node_idx)
-        elif "mesh" not in node:
-            # meshの割り当て用ボーンは表示枠には入れない
-            if node_idx not in pmx.display_slots["Others"].references:
-                pmx.display_slots["Others"].references.append(node_idx)
 
         if "children" in node:
             # 子ボーンがある場合
@@ -411,8 +571,8 @@ class VrmReader(PmxReader):
                 self.define_bone(vrm, pmx, child_idx, node_idx)
 
                 # 表示先を設定(最初のボーン系子ども)
-                if pmx.bones[bone_name].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].english_name and "Bip" in bone.english_name) or "Bip" not in bone.english_name):
-                    pmx.bones[bone_name].tail_index = child_idx
+                if pmx.bones[jp_bone_name].tail_index == -1 and (("Bip" in pmx.bones[pmx.bone_indexes[child_idx]].english_name and "Bip" in bone.english_name) or "Bip" not in bone.english_name):
+                    pmx.bones[jp_bone_name].tail_index = child_idx
 
     # アクセサの数を取得する
     def count_from_accessor(self, vrm: VrmModel, accessor_idx: int):

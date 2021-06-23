@@ -208,8 +208,46 @@ class PmxWriter:
                 fout.write(struct.pack(TYPE_INT, bone.layer))
                 # ボーンフラグ
                 fout.write(struct.pack(TYPE_SHORT, bone.flag))
-                # 接続先ボーンのボーンIndex
-                fout.write(struct.pack(bone_idx_type, bone.tail_index))
+
+                if not bone.getConnectionFlag():
+                    # 接続先位置
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.x())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.y())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.z())))
+                elif bone.getConnectionFlag():
+                    # 接続先ボーンのボーンIndex
+                    fout.write(struct.pack(bone_idx_type, bone.tail_index))
+
+                if bone.getExternalRotationFlag() or bone.getExternalTranslationFlag():
+                    # 付与親指定ありの場合
+                    fout.write(struct.pack(bone_idx_type, bone.effect_index))
+                    fout.write(struct.pack(TYPE_FLOAT, bone.effect_factor))
+
+                if bone.getIkFlag():
+                    # IKボーン
+                    # n  : ボーンIndexサイズ  | IKターゲットボーンのボーンIndex
+                    fout.write(struct.pack(bone_idx_type, bone.ik.target_index))
+                    # 4  : int  	| IKループ回数
+                    fout.write(struct.pack(TYPE_INT, bone.ik.loop))
+                    # 4  : float	| IKループ計算時の1回あたりの制限角度 -> ラジアン角
+                    fout.write(struct.pack(TYPE_FLOAT, bone.ik.limit_radian))
+                    # 4  : int  	| IKリンク数 : 後続の要素数
+                    fout.write(struct.pack(TYPE_INT, len(bone.ik.link)))
+
+                    for link in bone.ik.link:
+                        # n  : ボーンIndexサイズ  | リンクボーンのボーンIndex
+                        fout.write(struct.pack(bone_idx_type, link.bone_index))
+                        # 1  : byte	| 角度制限 0:OFF 1:ON
+                        fout.write(struct.pack(TYPE_BYTE, link.limit_angle))
+
+                        if link.limit_angle == 1:
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_min.x())))
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_min.y())))
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_min.z())))
+
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.x())))
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.y())))
+                            fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.z())))
 
             logger.info(f"-- ボーンデータ出力終了({len(list(pmx.bones.values()))})")
 

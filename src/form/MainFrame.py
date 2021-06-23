@@ -5,6 +5,7 @@ import sys
 import wx
 
 from form.panel.ExportPanel import ExportPanel
+from form.panel.BonePanel import BonePanel
 from module.MMath import MRect, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils import MFormUtils, MFileUtils # noqa
 from utils.MLogger import MLogger # noqa
@@ -70,6 +71,10 @@ class MainFrame(wx.Frame):
         # PMX変換タブ
         self.export_panel_ctrl = ExportPanel(self, self.note_ctrl, 9)
         self.note_ctrl.AddPage(self.export_panel_ctrl, u"PMX変換", False)
+
+        # # ボーン設定タブ
+        # self.bone_panel_ctrl = BonePanel(self, self.note_ctrl, 9)
+        # self.note_ctrl.AddPage(self.bone_panel_ctrl, u"ボーン", False)
 
         # ---------------------------------------------
 

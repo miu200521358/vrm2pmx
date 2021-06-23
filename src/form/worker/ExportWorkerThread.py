@@ -8,6 +8,7 @@ import wx
 import time
 import gc
 from pathlib import Path
+from form.panel.BonePanel import BONE_PAIRS
 
 from form.worker.BaseWorkerThread import BaseWorkerThread, task_takes_time
 from service.Vrm2PmxExportService import Vrm2PmxExportService
@@ -43,6 +44,7 @@ class ExportWorkerThread(BaseWorkerThread):
                     logging_level=self.frame.logging_level, \
                     vrm_model=self.frame.export_panel_ctrl.vrm_model_file_ctrl.data, \
                     output_path=self.frame.export_panel_ctrl.output_pmx_file_ctrl.file_ctrl.GetPath(), \
+                    bone_pairs=BONE_PAIRS, \
                     monitor=self.frame.export_panel_ctrl.console_ctrl, \
                     is_file=False, \
                     outout_datetime=logger.outout_datetime, \
