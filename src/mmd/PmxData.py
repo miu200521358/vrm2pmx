@@ -332,6 +332,46 @@ class Bone:
 
 
 # モーフ構造-----------------------
+class GroupMorphData:
+    def __init__(self, morph_index, value):
+        self.morph_index = morph_index
+        self.value = value
+
+
+class VertexMorphOffset:
+    def __init__(self, vertex_index, position_offset):
+        self.vertex_index = vertex_index
+        self.position_offset = position_offset
+
+
+class BoneMorphData:
+    def __init__(self, bone_index, position, rotation):
+        self.bone_index = bone_index
+        self.position = position
+        self.rotation = rotation
+
+
+class UVMorphData:
+    def __init__(self, vertex_index, uv):
+        self.vertex_index = vertex_index
+        self.uv = uv
+
+
+class MaterialMorphData:
+    def __init__(self, material_index, calc_mode, diffuse, specular, specular_factor, ambient, edge_color, edge_size, texture_factor, sphere_texture_factor, toon_texture_factor):
+        self.material_index = material_index
+        self.calc_mode = calc_mode
+        self.diffuse = diffuse
+        self.specular = specular
+        self.specular_factor = specular_factor
+        self.ambient = ambient
+        self.edge_color = edge_color
+        self.edge_size = edge_size
+        self.texture_factor = texture_factor
+        self.sphere_texture_factor = sphere_texture_factor
+        self.toon_texture_factor = toon_texture_factor
+
+
 class Morph:
     def __init__(self, name, english_name, panel, morph_type, offsets=None):
         self.index = 0
@@ -361,41 +401,6 @@ class Morph:
         else:
             return "？"
             
-    class GroupMorphData:
-        def __init__(self, morph_index, value):
-            self.morph_index = morph_index
-            self.value = value
-
-    class VertexMorphOffset:
-        def __init__(self, vertex_index, position_offset):
-            self.vertex_index = vertex_index
-            self.position_offset = position_offset
-
-    class BoneMorphData:
-        def __init__(self, bone_index, position, rotation):
-            self.bone_index = bone_index
-            self.position = position
-            self.rotation = rotation
-
-    class UVMorphData:
-        def __init__(self, vertex_index, uv):
-            self.vertex_index = vertex_index
-            self.uv = uv
-
-    class MaterialMorphData:
-        def __init__(self, material_index, calc_mode, diffuse, specular, specular_factor, ambient, edge_color, edge_size, texture_factor, sphere_texture_factor, toon_texture_factor):
-            self.material_index = material_index
-            self.calc_mode = calc_mode
-            self.diffuse = diffuse
-            self.specular = specular
-            self.specular_factor = specular_factor
-            self.ambient = ambient
-            self.edge_color = edge_color
-            self.edge_size = edge_size
-            self.texture_factor = texture_factor
-            self.sphere_texture_factor = sphere_texture_factor
-            self.toon_texture_factor = toon_texture_factor
-
 
 # 表示枠構造-----------------------
 class DisplaySlot:

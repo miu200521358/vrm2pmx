@@ -12,7 +12,7 @@ import re
 import math
 
 from mmd.VrmData import VrmModel # noqa
-from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
+from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, VertexMorphOffset # noqa
 from mmd.PmxReader import PmxReader
 from module.MMath import MRect, MVector2D, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
@@ -142,36 +142,17 @@ class VrmReader(PmxReader):
                     for nidx, node in enumerate(vrm.json_data["nodes"]):
                         self.define_bone(vrm, bones, nidx, "", node_pairs)
                 
-                # 表示枠
-                pmx.display_slots["全ての親"] = DisplaySlot("全ての親", "Root", 1, 0)
-                pmx.display_slots["全ての親"].references.append(0)
-
-                # FIXME モーフの定義
-                pmx.display_slots["表情"] = DisplaySlot("表情", "表情", 1, 1)
-
                 # ボーンの定義
                 self.custom_bones(pmx, bones)
 
-                for jp_bone_name, bone in pmx.bones.items():
-                    if "全ての親" == jp_bone_name:
-                        continue
-
-                    if bone.english_name in self.bone_pairs:
-                        # MMDボーン定義内の場合
-                        bone_config = self.bone_pairs[bone.english_name]
-
-                        if not bone_config["display"]:
-                            continue
-                        elif bone_config["display"] not in pmx.display_slots:
-                            pmx.display_slots[bone_config["display"]] = DisplaySlot(bone_config["display"], bone_config["display"], 0, 0)
-
-                        pmx.display_slots[bone_config["display"]].references.append(pmx.bones[jp_bone_name].index)
-                    else:
-                        if "その他" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
-                            pmx.display_slots["その他"] = DisplaySlot("その他", "その他", 0, 0)
-                        pmx.display_slots["その他"].references.append(pmx.bones[jp_bone_name].index)
-
                 logger.info(f'-- ボーンデータ解析[{len(pmx.bones.keys())}]')
+
+                # 表示枠 ------------------------
+                pmx.display_slots["全ての親"] = DisplaySlot("全ての親", "Root", 1, 0)
+                pmx.display_slots["全ての親"].references.append(0)
+
+                # モーフの表示枠
+                pmx.display_slots["表情"] = DisplaySlot("表情", "表情", 1, 1)
 
                 if "meshes" in vrm.json_data:
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
@@ -204,6 +185,28 @@ class VrmReader(PmxReader):
                                         # 対応するジョイントデータ
                                         skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
                                         
+                                        if "extras" in primitive and "targetNames" in primitive["extras"] and "targets" in primitive:
+                                            for eidx, (extra, target) in enumerate(zip(primitive["extras"]["targetNames"], primitive["targets"])):
+                                                # 位置データ
+                                                extra_positions = self.read_from_accessor(vrm, target["POSITION"])
+
+                                                # 法線データ
+                                                extra_normals = self.read_from_accessor(vrm, target["NORMAL"])
+
+                                                morph = Morph(extra, extra, 1, 1, 0)
+                                                morph.index = eidx
+
+                                                morph_vertex_idx = vertex_idx
+                                                for vidx, (eposition, enormal) in enumerate(zip(extra_positions, extra_normals)):
+                                                    pmx_eposition = eposition * MIKU_METER * MVector3D(-1, 1, 1)
+                                                    # pmx_enormal = enormal * MVector3D(-1, 1, 1)
+
+                                                    morph.offsets.append(VertexMorphOffset(morph_vertex_idx, pmx_eposition))
+                                                    morph_vertex_idx += 1
+
+                                                pmx.morphs[morph.name] = morph
+                                                pmx.display_slots["表情"].references.append(morph.index)
+
                                         for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
                                             pmx_position = position * MIKU_METER * MVector3D(-1, 1, 1)
 
@@ -370,10 +373,12 @@ class VrmReader(PmxReader):
                                         material = Material(vrm_material["name"], vrm_material["name"], diffuse_color, alpha, specular_factor, specular_color, \
                                                             ambient_color, flag, edge_color, edge_size, texture_index, sphere_texture_index, sphere_mode, toon_sharing_flag, \
                                                             toon_texture_index, "", len(indices))
+                                        
+                                        material_key = "Eye" if "Eye" in material.name else vrm_material["alphaMode"]
 
-                                        if vrm_material["alphaMode"] not in materials_by_type:
-                                            materials_by_type[vrm_material["alphaMode"]] = {}
-                                        materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]] = material
+                                        if material_key not in materials_by_type:
+                                            materials_by_type[material_key] = {}
+                                        materials_by_type[material_key][vrm_material["name"]] = material
 
                                         logger.info(f'-- 材質データ解析[{vrm_material["name"]}]')
                                     else:
@@ -384,7 +389,7 @@ class VrmReader(PmxReader):
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
 
                 # 材質を不透明(OPAQUE)→透明順(BLEND)に並べ替て設定
-                for material_type in ["OPAQUE", "MASK", "BLEND"]:
+                for material_type in ["OPAQUE", "MASK", "BLEND", "Eye"]:
                     if material_type in materials_by_type:
                         for material in materials_by_type[material_type].values():
                             pmx.materials[material.name] = material
@@ -393,6 +398,26 @@ class VrmReader(PmxReader):
                                 pmx.indices.append(indices_by_material[material.name][midx + 2])
                                 pmx.indices.append(indices_by_material[material.name][midx + 1])
                                 pmx.indices.append(indices_by_material[material.name][midx])
+
+                # ボーンの表示枠 ------------------------
+                for jp_bone_name, bone in pmx.bones.items():
+                    if "全ての親" == jp_bone_name:
+                        continue
+
+                    if bone.english_name in self.bone_pairs:
+                        # MMDボーン定義内の場合
+                        bone_config = self.bone_pairs[bone.english_name]
+
+                        if not bone_config["display"]:
+                            continue
+                        elif bone_config["display"] not in pmx.display_slots:
+                            pmx.display_slots[bone_config["display"]] = DisplaySlot(bone_config["display"], bone_config["display"], 0, 0)
+
+                        pmx.display_slots[bone_config["display"]].references.append(pmx.bones[jp_bone_name].index)
+                    else:
+                        if "その他" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
+                            pmx.display_slots["その他"] = DisplaySlot("その他", "その他", 0, 0)
+                        pmx.display_slots["その他"].references.append(pmx.bones[jp_bone_name].index)
 
             return True
         except MKilledException as ke:
@@ -548,7 +573,7 @@ class VrmReader(PmxReader):
                                     dest_joints = np.append(dest_joints, pmx.bones[dest_to_bone_name].index)
                                     org_weights = np.append(org_weights, arm_twist_weights)
 
-                                    logger.debug("[%s] from: %s, to: %s, factor: %s, dest_joints: %s, org_weights: %s", vertex_idx, dest_from_bone_name, dest_to_bone_name, arm_twist_factor, dest_joints, org_weights)
+                                    logger.test("[%s] from: %s, to: %s, factor: %s, dest_joints: %s, org_weights: %s", vertex_idx, dest_from_bone_name, dest_to_bone_name, arm_twist_factor, dest_joints, org_weights)
 
         # 載せ替えた事で、ジョイントが重複している場合があるので、調整する
         joint_weights = {}

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 #
+from math import modf
 import struct
 from sys import maxsize
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
@@ -125,7 +126,7 @@ class PmxWriter:
 
             # 面データ
             for iidx, index in enumerate(pmx.indices):
-                fout.write(struct.pack(vertex_idx_unsigned_type, index))
+                fout.write(struct.pack(vertex_idx_type, index))
 
             logger.info(f"-- 面データ出力終了({len(pmx.indices)})")
 
@@ -259,6 +260,23 @@ class PmxWriter:
 
             # モーフの数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.morphs.values()))))
+
+            for midx, morph in enumerate(pmx.morphs.values()):
+                # モーフ名
+                self.write_text(fout, morph.name, f"Morph {midx}")
+                self.write_text(fout, morph.english_name, f"Morph {midx}")
+                # 操作パネル (PMD:カテゴリ) 1:眉(左下) 2:目(左上) 3:口(右上) 4:その他(右下)  | 0:システム予約
+                fout.write(struct.pack(TYPE_BYTE, morph.panel))
+                # モーフ種類 - 0:グループ, 1:頂点, 2:ボーン, 3:UV, 4:追加UV1, 5:追加UV2, 6:追加UV3, 7:追加UV4, 8:材質
+                fout.write(struct.pack(TYPE_BYTE, morph.morph_type))
+                # モーフのオフセット数 : 後続の要素数
+                fout.write(struct.pack(TYPE_INT, len(morph.offsets)))
+
+                for offset in morph.offsets:
+                    fout.write(struct.pack(vertex_idx_type, offset.vertex_index))
+                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.x())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.y())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.z())))
 
             logger.info(f"-- モーフデータ出力終了({len(list(pmx.morphs.values()))})")
 

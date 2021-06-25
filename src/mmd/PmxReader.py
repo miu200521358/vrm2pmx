@@ -3,7 +3,8 @@
 import struct
 import hashlib
 
-from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
+from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink # noqa
+from mmd.PmxData import Bdef1, Bdef2, Bdef4, Sdef, Qdef, GroupMorphData, VertexMorphOffset, BoneMorphData, UVMorphData, MaterialMorphData # noqa
 from module.MMath import MRect, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
 from utils.MException import SizingException, MKilledException, MParseException
@@ -589,31 +590,31 @@ class PmxReader:
                     logger.test("bone: %s, len_3d: %s", v.name, v.len_3d)
 
     def read_group_morph_data(self):
-        return Morph.GroupMorphData(
+        return GroupMorphData(
             self.read_morph_index_size(),
             self.read_float()
         )
 
     def read_vertex_position_morph_offset(self):
-        return Morph.VertexMorphOffset(
+        return VertexMorphOffset(
             self.read_vertex_index_size(), self.read_Vector3D())
 
     def read_bone_morph_data(self):
-        return Morph.BoneMorphData(
+        return BoneMorphData(
             self.read_bone_index_size(),
             self.read_Vector3D(),
             self.read_Quaternion()
         )
 
     def read_uv_morph_data(self):
-        return Morph.UVMorphData(
+        return UVMorphData(
             self.read_vertex_index_size(),
             self.read_Vector4D(),
         )
 
     def read_material_morph_data(self):
         # 材質モーフはRGB(A)に負数が入る場合があるので、Vector型で保持
-        return Morph.MaterialMorphData(
+        return MaterialMorphData(
             self.read_material_index_size(),
             self.read_int(1),
             self.read_Vector4D(),
