@@ -202,10 +202,7 @@ class VrmReader(PmxReader):
                                             weights = [MVector4D() for _ in range(len(positions))]
 
                                         # 対応するジョイントデータ
-                                        try:
-                                            skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
-                                        except:
-                                            skin_joints = [MVector4D() for _ in range(len(positions))]
+                                        skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
                                         
                                         for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
                                             pmx_position = position * MIKU_METER * MVector3D(-1, 1, 1)
@@ -516,21 +513,12 @@ class VrmReader(PmxReader):
                     # 腕に割り当てられているウェイトの場合
                     arm_elbow_distance = pmx.bones[dest_elbow_bone_name].position.x() - pmx.bones[dest_arm_bone_name].position.x()
                     vector_arm_distance = vertex_pos.x() - pmx.bones[dest_arm_bone_name].position.x()
-                    twist_list = [(dest_arm_bone_name, dest_arm_twist1_bone_name, dest_arm_bone_name), \
-                                  (dest_arm_bone_name, dest_arm_twist2_bone_name, dest_arm_twist1_bone_name), \
-                                  (dest_arm_bone_name, dest_arm_twist3_bone_name, dest_arm_twist2_bone_name)]
-                # # 腕捩に分散する
-                # elif pmx.bones[dest_elbow_bone_name].index in dest_joints:
-                #     # ひじに割り当てられているウェイトの場合
-                #     arm_elbow_distance = pmx.bones[dest_elbow_bone_name].position.x() - pmx.bones[dest_arm_bone_name].position.x()
-                #     vector_arm_distance = pmx.bones[dest_elbow_bone_name].position.x() - vertex_pos.x()
-                #     twist_list = [(dest_elbow_bone_name, dest_arm_twist1_bone_name, dest_arm_bone_name, None), \
-                #                   (dest_elbow_bone_name, dest_arm_twist2_bone_name, dest_arm_twist1_bone_name, None), \
-                #                   (dest_elbow_bone_name, dest_arm_twist3_bone_name, dest_arm_twist2_bone_name, None), \
-                #                   (dest_elbow_bone_name, dest_elbow_bone_name, dest_arm_twist3_bone_name, None)]
+                    twist_list = [(dest_arm_twist1_bone_name, dest_arm_bone_name), \
+                                  (dest_arm_twist2_bone_name, dest_arm_twist1_bone_name), \
+                                  (dest_arm_twist3_bone_name, dest_arm_twist2_bone_name)]
 
                 if np.sign(arm_elbow_distance) == np.sign(vector_arm_distance):
-                    for dest_origin_bone_name, dest_to_bone_name, dest_from_bone_name in twist_list:
+                    for dest_to_bone_name, dest_from_bone_name in twist_list:
                         # 腕からひじの間の頂点の場合
                         twist_distance = pmx.bones[dest_to_bone_name].position.x() - pmx.bones[dest_from_bone_name].position.x()
                         vector_distance = vertex_pos.x() - pmx.bones[dest_from_bone_name].position.x()
