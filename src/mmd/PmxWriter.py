@@ -222,6 +222,12 @@ class PmxWriter:
                     # 付与親指定ありの場合
                     fout.write(struct.pack(bone_idx_type, bone.effect_index))
                     fout.write(struct.pack(TYPE_FLOAT, bone.effect_factor))
+                
+                if bone.getFixedAxisFlag():
+                    # 軸制限先
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.fixed_axis.x())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.fixed_axis.y())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.fixed_axis.z())))
 
                 if bone.getIkFlag():
                     # IKボーン

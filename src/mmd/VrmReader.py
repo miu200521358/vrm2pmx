@@ -93,7 +93,7 @@ class VrmReader(PmxReader):
                 vrm.json_data = json.loads(json_text)
                 
                 # JSON出力
-                jf = open(os.path.join(glft_dir_path, "gltf.json"), "w")
+                jf = open(os.path.join(glft_dir_path, "gltf.json"), "w", encoding='utf-8')
                 json.dump(vrm.json_data, jf, ensure_ascii=False, indent=4, sort_keys=True, separators=(',', ': '))
                 logger.info("-- JSON出力終了")
 
@@ -190,17 +190,28 @@ class VrmReader(PmxReader):
                                         uvs = self.read_from_accessor(vrm, primitive["attributes"]["TEXCOORD_0"])
 
                                         # ジョイントデータ(MMDのジョイントとは異なる)
-                                        joints = self.read_from_accessor(vrm, primitive["attributes"]["JOINTS_0"])
+                                        if "JOINTS_0" in primitive["attributes"]:
+                                            joints = self.read_from_accessor(vrm, primitive["attributes"]["JOINTS_0"])
+                                        else:
+                                            joints = [MVector4D() for _ in range(len(positions))]
                                         
                                         # ウェイトデータ
-                                        weights = self.read_from_accessor(vrm, primitive["attributes"]["WEIGHTS_0"])
+                                        if "WEIGHTS_0" in primitive["attributes"]:
+                                            weights = self.read_from_accessor(vrm, primitive["attributes"]["WEIGHTS_0"])
+                                        else:
+                                            weights = [MVector4D() for _ in range(len(positions))]
 
-                                        # # 対応するジョイントデータ
-                                        skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
+                                        # 対応するジョイントデータ
+                                        try:
+                                            skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
+                                        except:
+                                            skin_joints = [MVector4D() for _ in range(len(positions))]
                                         
                                         for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
+                                            pmx_position = position * MIKU_METER * MVector3D(-1, 1, 1)
+
                                             # 有効なINDEX番号と実際のボーンINDEXを取得
-                                            valiable_joints, joint_idxs, weight_values = self.get_deform_index(pmx, joint, skin_joints, node_pairs, weight)
+                                            joint_idxs, weight_values = self.get_deform_index(vertex_idx, pmx, pmx_position, joint, skin_joints, node_pairs, weight)
                                             if len(joint_idxs) > 1:
                                                 if len(joint_idxs) == 2:
                                                     # ウェイトが2つの場合、Bdef2
@@ -209,11 +220,14 @@ class VrmReader(PmxReader):
                                                     # それ以上の場合、Bdef4
                                                     deform = Bdef4(joint_idxs[0], joint_idxs[1], joint_idxs[2], joint_idxs[3], \
                                                                    weight_values[0], weight_values[1], weight_values[2], weight_values[3])
-                                            else:
+                                            elif len(joint_idxs) == 1:
                                                 # ウェイトが1つのみの場合、Bdef1
                                                 deform = Bdef1(joint_idxs[0])
+                                            else:
+                                                # とりあえず除外
+                                                deform = Bdef1(0)
 
-                                            vertex = Vertex(vertex_idx, position * MIKU_METER * MVector3D(-1, 1, 1), normal * MVector3D(-1, 1, 1), uv, None, deform, 1)
+                                            vertex = Vertex(vertex_idx, pmx_position, normal * MVector3D(-1, 1, 1), uv, None, deform, 1)
                                             if vidx == 0:
                                                 # ブロック毎の開始頂点INDEXを保持
                                                 accessors[primitive["attributes"]["POSITION"]] = vertex_idx
@@ -308,8 +322,11 @@ class VrmReader(PmxReader):
                                                 hair_diffuse_img = ImageChops.multiply(hair_img, diffuse_img)
 
                                                 # 反射色の画像
-                                                emissive_ary = np.array(vrm_material["emissiveFactor"])
-                                                emissive_ary = np.append(emissive_ary, 1)
+                                                if "emissiveFactor" in vrm_material:
+                                                    emissive_ary = np.array(vrm_material["emissiveFactor"])
+                                                    emissive_ary = np.append(emissive_ary, 1)
+                                                else:
+                                                    emissive_ary = np.array([0, 0, 0, 1])
                                                 emissive_img = Image.fromarray(np.tile(emissive_ary * 255, (spe_ary.shape[0], spe_ary.shape[1], 1)).astype(np.uint8))
                                                 hair_emissive_img = ImageChops.multiply(spe_img, emissive_img)
 
@@ -328,9 +345,13 @@ class VrmReader(PmxReader):
                                         else:
                                             # そのまま出力
                                             texture_index = material_ext["textureProperties"]["_MainTex"] + 1
-                                        sphere_texture_index = material_ext["textureProperties"]["_SphereAdd"] + 1
-                                        # 加算スフィア
-                                        sphere_mode = 2
+                                        
+                                        sphere_texture_index = 0
+                                        sphere_mode = 0
+                                        if "_SphereAdd" in material_ext["textureProperties"]:
+                                            sphere_texture_index = material_ext["textureProperties"]["_SphereAdd"] + 1
+                                            # 加算スフィア
+                                            sphere_mode = 2
 
                                         if "vectorProperties" in material_ext and "_ShadeColor" in material_ext["vectorProperties"]:
                                             toon_sharing_flag = 0
@@ -387,8 +408,54 @@ class VrmReader(PmxReader):
             import traceback
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
-        
-    def create_leg_ik(self, pmx: PmxModel, direction: str):
+    
+    def create_bone_arm_twist(self, pmx: PmxModel, direction: str):
+        arm_name = f'{direction}腕'
+        elbow_name = f'{direction}ひじ'
+        arm_twist_name = f'{direction}腕捩'
+
+        if arm_name in pmx.bones and elbow_name in pmx.bones:
+            # 腕捩
+            arm_twist_bone = pmx.bones[arm_twist_name]
+            arm_twist_bone.position = pmx.bones[arm_name].position + (pmx.bones[elbow_name].position - pmx.bones[arm_name].position) * 0.5
+            arm_twist_bone.parent_index = pmx.bones[arm_name].index
+            arm_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400
+            arm_twist_bone.fixed_axis = (pmx.bones[elbow_name].position - pmx.bones[arm_name].position).normalized()
+            
+            # 腕捩内部
+            for twist_idx, factor in [(1, 0.25), (2, 0.5), (3, 0.75)]:
+                arm_twist_sub_name = f'{direction}腕捩{twist_idx}'
+                arm_twist_sub_bone = pmx.bones[arm_twist_sub_name]
+                arm_twist_sub_bone.position = pmx.bones[arm_name].position + (pmx.bones[elbow_name].position - pmx.bones[arm_name].position) * factor
+                arm_twist_sub_bone.parent_index = pmx.bones[arm_name].index
+                arm_twist_sub_bone.flag = 0x0000 | 0x0002 | 0x0100
+                arm_twist_sub_bone.effect_index = pmx.bones[arm_twist_name].index
+                arm_twist_sub_bone.effect_factor = factor
+
+    def create_bone_wrist_twist(self, pmx: PmxModel, direction: str):
+        elbow_name = f'{direction}ひじ'
+        wrist_name = f'{direction}手首'
+        wrist_twist_name = f'{direction}手捩'
+
+        if elbow_name in pmx.bones and wrist_name in pmx.bones:
+            # 手捩
+            wrist_twist_bone = pmx.bones[wrist_twist_name]
+            wrist_twist_bone.position = pmx.bones[elbow_name].position + (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position) * 0.5
+            wrist_twist_bone.parent_index = pmx.bones[elbow_name].index
+            wrist_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400
+            wrist_twist_bone.fixed_axis = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            
+            # 手捩内部
+            for twist_idx, factor in [(1, 0.25), (2, 0.5), (3, 0.75)]:
+                wrist_twist_sub_name = f'{direction}手捩{twist_idx}'
+                wrist_twist_sub_bone = pmx.bones[wrist_twist_sub_name]
+                wrist_twist_sub_bone.position = pmx.bones[elbow_name].position + (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position) * factor
+                wrist_twist_sub_bone.parent_index = pmx.bones[elbow_name].index
+                wrist_twist_sub_bone.flag = 0x0000 | 0x0002 | 0x0100
+                wrist_twist_sub_bone.effect_index = pmx.bones[wrist_twist_name].index
+                wrist_twist_sub_bone.effect_factor = factor
+
+    def create_bone_leg_ik(self, pmx: PmxModel, direction: str):
         leg_name = f'{direction}足'
         knee_name = f'{direction}ひざ'
         ankle_name = f'{direction}足首'
@@ -412,12 +479,14 @@ class VrmReader(PmxReader):
             toe_ik_bone = Bone(toe_ik_name, toe_ik_name, pmx.bones[toe_name].position, pmx.bones[leg_ik_bone.name].name, 1, flag, MVector3D(0, -1, 0), ik=toe_ik)
             pmx.bones[toe_ik_bone.name] = toe_ik_bone
     
-    def get_deform_index(self, pmx: PmxModel, joint: list, skin_joints: list, node_pairs: dict, org_weight: list):
+    def get_deform_index(self, vertex_idx: int, pmx: PmxModel, vertex_pos: MVector3D, joint: list, skin_joints: list, node_pairs: dict, node_weight: list):
         # まずは0じゃないデータ（何かしら有効なボーンINDEXがあるリスト）
         valiable_joints = np.where(joint.data() > 0)[0].tolist()
+        # ウェイト
+        org_weights = node_weight.data()[np.where(joint.data() > 0)]
         # ジョイント添え字からジョイントINDEXを取得(floatになってるのでint)
         org_joint_idxs = joint.data()[valiable_joints].astype(np.int)
-        # オフセットを加味したジョイント
+        # 現行ボーンINDEXに置き換えたINDEX
         dest_joint_list = []
         for jidx in org_joint_idxs.tolist():
             dest_joint_list.append(pmx.bones[node_pairs[skin_joints[jidx]]].index)
@@ -430,13 +499,72 @@ class VrmReader(PmxReader):
             for dest_bone_name in [f'{direction}足', f'{direction}ひざ', f'{direction}足首']:
                 src_bone_name = f'{dest_bone_name}D'
                 dest_joints = np.where(dest_joints == pmx.bones[dest_bone_name].index, pmx.bones[src_bone_name].index, dest_joints)
+            
+            for base_from_name, base_to_name, base_twist_name in [('腕', 'ひじ', '腕捩'), ('ひじ', '手首', '手捩')]:
+                dest_arm_bone_name = f'{direction}{base_from_name}'
+                dest_elbow_bone_name = f'{direction}{base_to_name}'
+                dest_arm_twist1_bone_name = f'{direction}{base_twist_name}1'
+                dest_arm_twist2_bone_name = f'{direction}{base_twist_name}2'
+                dest_arm_twist3_bone_name = f'{direction}{base_twist_name}3'
 
-        # 有効なウェイト値
-        target_weights = org_weight.data()[valiable_joints]
+                arm_elbow_distance = -1
+                vector_arm_distance = 1
+
+                # 腕捩に分散する
+                if pmx.bones[dest_arm_bone_name].index in dest_joints or pmx.bones[dest_arm_twist1_bone_name].index in dest_joints \
+                   or pmx.bones[dest_arm_twist2_bone_name].index in dest_joints or pmx.bones[dest_arm_twist3_bone_name].index in dest_joints:
+                    # 腕に割り当てられているウェイトの場合
+                    arm_elbow_distance = pmx.bones[dest_elbow_bone_name].position.x() - pmx.bones[dest_arm_bone_name].position.x()
+                    vector_arm_distance = vertex_pos.x() - pmx.bones[dest_arm_bone_name].position.x()
+                    twist_list = [(dest_arm_bone_name, dest_arm_twist1_bone_name, dest_arm_bone_name), \
+                                  (dest_arm_bone_name, dest_arm_twist2_bone_name, dest_arm_twist1_bone_name), \
+                                  (dest_arm_bone_name, dest_arm_twist3_bone_name, dest_arm_twist2_bone_name)]
+                # # 腕捩に分散する
+                # elif pmx.bones[dest_elbow_bone_name].index in dest_joints:
+                #     # ひじに割り当てられているウェイトの場合
+                #     arm_elbow_distance = pmx.bones[dest_elbow_bone_name].position.x() - pmx.bones[dest_arm_bone_name].position.x()
+                #     vector_arm_distance = pmx.bones[dest_elbow_bone_name].position.x() - vertex_pos.x()
+                #     twist_list = [(dest_elbow_bone_name, dest_arm_twist1_bone_name, dest_arm_bone_name, None), \
+                #                   (dest_elbow_bone_name, dest_arm_twist2_bone_name, dest_arm_twist1_bone_name, None), \
+                #                   (dest_elbow_bone_name, dest_arm_twist3_bone_name, dest_arm_twist2_bone_name, None), \
+                #                   (dest_elbow_bone_name, dest_elbow_bone_name, dest_arm_twist3_bone_name, None)]
+
+                if np.sign(arm_elbow_distance) == np.sign(vector_arm_distance):
+                    for dest_origin_bone_name, dest_to_bone_name, dest_from_bone_name in twist_list:
+                        # 腕からひじの間の頂点の場合
+                        twist_distance = pmx.bones[dest_to_bone_name].position.x() - pmx.bones[dest_from_bone_name].position.x()
+                        vector_distance = vertex_pos.x() - pmx.bones[dest_from_bone_name].position.x()
+                        if np.sign(twist_distance) == np.sign(vector_distance):
+                            # 腕から腕捩1の間にある頂点の場合
+                            arm_twist_factor = vector_distance / twist_distance
+                            # 腕が割り当てられているウェイトINDEX
+                            arm_twist_weight_joints = np.where(dest_joints == pmx.bones[dest_from_bone_name].index)[0]
+                            if len(arm_twist_weight_joints) > 0:
+                                if arm_twist_factor > 1:
+                                    # 範囲より先の場合
+                                    dest_joints[arm_twist_weight_joints] = pmx.bones[dest_to_bone_name].index
+                                else:
+                                    # 腕のウェイト値
+                                    dest_arm_weight = org_weights[arm_twist_weight_joints]
+                                    # 腕捩のウェイトはウェイト値の指定割合
+                                    arm_twist_weights = dest_arm_weight * arm_twist_factor
+                                    # 腕のウェイト値は残り
+                                    arm_weights = dest_arm_weight * (1 - arm_twist_factor)
+
+                                    # FROMのウェイトを載せ替える
+                                    valiable_joints = valiable_joints + [pmx.bones[dest_from_bone_name].index]
+                                    dest_joints[arm_twist_weight_joints] = pmx.bones[dest_from_bone_name].index
+                                    org_weights[arm_twist_weight_joints] = arm_weights
+                                    # 腕捩のウェイトを追加する
+                                    valiable_joints = valiable_joints + [pmx.bones[dest_to_bone_name].index]
+                                    dest_joints = np.append(dest_joints, pmx.bones[dest_to_bone_name].index)
+                                    org_weights = np.append(org_weights, arm_twist_weights)
+
+                                    logger.debug("[%s] from: %s, to: %s, factor: %s, dest_joints: %s, org_weights: %s", vertex_idx, dest_from_bone_name, dest_to_bone_name, arm_twist_factor, dest_joints, org_weights)
 
         # 載せ替えた事で、ジョイントが重複している場合があるので、調整する
         joint_weights = {}
-        for j, w in zip(dest_joints, target_weights):
+        for j, w in zip(dest_joints, org_weights):
             if j not in joint_weights:
                 joint_weights[j] = 0
             joint_weights[j] += w
@@ -449,9 +577,15 @@ class VrmReader(PmxReader):
 
         if len(joint_values) == 3:
             # 3つの場合、0を入れ込む
-            return valiable_joints, joint_values + [0], weight_values + [0]
+            return joint_values + [0], weight_values + [0]
+        elif len(joint_values) > 4:
+            # 4より多い場合、一番小さいのを捨てる（大体誤差）
+            remove_idx = np.argmin(np.array(weight_values)).T
+            del valiable_joints[remove_idx]
+            del joint_values[remove_idx]
+            del weight_values[remove_idx]
 
-        return valiable_joints, joint_values, weight_values
+        return joint_values, weight_values
     
     # ボーンの再定義
     def custom_bones(self, pmx: PmxModel, bones: dict):
@@ -484,20 +618,16 @@ class VrmReader(PmxReader):
             elif "肩C" in bone_name:
                 pmx.bones[bone_name] = Bone(bone_name, node_name, pmx.bones[bone_name[:-1]].position, \
                                             pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0100, MVector3D(), effect_index=pmx.bones[bone_name.replace("C", "P")].index, effect_factor=-1)
-            elif "腕捩" in bone_name[1:-1]:
-            
-            elif "腕捩" in bone_name[1:-1]:
-                factor = 0.4 if "1" in bone_name else 0.5 if "2" in bone_name else 0.6
-                flag = 0x0000 | 0x0002
-                if bone_name[-1] not in ["1", "2", "3"]:
-                    flag |= 0x0008 | 0x0010
-                pmx.bones[bone_name] = Bone(bone_name, node_name, (pmx.bones[f'{bone_name[0]}腕'].position + pmx.bones[f'{bone_name[0]}ひじ'].position) * factor, \
-                                            pmx.bones[bone_config["parent"]].index, 0, flag, MVector3D())
-            elif "手捩" in bone_name:
-                pmx.bones[bone_name] = Bone(bone_name, node_name, (pmx.bones[f'{bone_name[0]}ひじ'].position + pmx.bones[f'{bone_name[0]}手首'].position) * 0.5, \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0008 | 0x0010, MVector3D())
+            elif "指先" in bone_name[-2:]:
+                if pmx.bones[bone_name].position == MVector3D():
+                    # 指先の値が入ってない場合、とりあえず-1
+                    pmx.bones[bone_name].position = pmx.bones[bone_config["parent"]].position + MVector3D(1 * np.sign(pmx.bones[bone_config["parent"]].position.x()), 0, 0)
+            elif "腕捩" in bone_name[-2:]:
+                self.create_bone_arm_twist(pmx, bone_name[0])
+            elif "手捩" in bone_name[-2:]:
+                self.create_bone_wrist_twist(pmx, bone_name[0])
             elif "足ＩＫ" in bone_name:
-                self.create_leg_ik(pmx, bone_name[0])
+                self.create_bone_leg_ik(pmx, bone_name[0])
             elif "頭" in bone_name:
                 pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
                 pmx.bones[bone_name].tail_index = -1
@@ -524,6 +654,8 @@ class VrmReader(PmxReader):
             # 親ボーンの設定
             if bone_config["parent"]:
                 pmx.bones[bone_name].parent_index = pmx.bones[bone_config["parent"]].index
+            elif pmx.bones[bone_name].parent_index in pmx.bones:
+                pmx.bones[bone_name].parent_index = pmx.bones[pmx.bones[bone_name].parent_index].index
             else:
                 pmx.bones[bone_name].parent_index = -1
             
@@ -602,7 +734,8 @@ class VrmReader(PmxReader):
                 child_bone_name = self.define_bone(vrm, bones, child_idx, jp_bone_name, node_pairs)
 
                 # 表示先を設定(最初のボーン系子ども)
-                if bones[jp_bone_name].tail_index == -1 and (("Bip" in bones[child_bone_name].english_name and "Bip" in bone.english_name) or "Bip" not in bone.english_name):
+                if bones[jp_bone_name].tail_index == -1 and bones[jp_bone_name].position != MVector3D() and \
+                   (("Bip" in bones[child_bone_name].english_name and "Bip" in bone.english_name) or "Bip" not in bone.english_name):
                     # とりあえず名称設定
                     bones[jp_bone_name].tail_index = bones[child_bone_name].name
 
