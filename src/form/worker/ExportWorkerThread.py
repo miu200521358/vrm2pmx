@@ -8,7 +8,7 @@ import wx
 import time
 import gc
 from pathlib import Path
-from form.panel.BonePanel import BONE_PAIRS
+from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS
 
 from form.worker.BaseWorkerThread import BaseWorkerThread, task_takes_time
 from service.Vrm2PmxExportService import Vrm2PmxExportService

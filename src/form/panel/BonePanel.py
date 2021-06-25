@@ -113,6 +113,83 @@ BONE_PAIRS = {
     "rightToes": {"name": "右足先EX", "parent": "右足首D", "tail": -1, "display": "右足"},
 }
 
+MORPH_EYEBROW = 1
+MORPH_EYE = 2
+MORPH_LIP = 3
+MORPH_OTHER = 4
+
+MORPH_PAIRS = {
+    "Neutral": {"name": "ニュートラル", "panel": MORPH_OTHER},
+    "A": {"name": "あ", "panel": MORPH_LIP},
+    "I": {"name": "い", "panel": MORPH_LIP},
+    "U": {"name": "う", "panel": MORPH_LIP},
+    "E": {"name": "え", "panel": MORPH_LIP},
+    "O": {"name": "お", "panel": MORPH_LIP},
+    "Blink": {"name": "まばたき", "panel": MORPH_EYE},
+    "Blink_L": {"name": "ウィンク２左", "panel": MORPH_EYE},
+    "Blink_R": {"name": "ウィンク２右", "panel": MORPH_EYE},
+    "Angry": {"name": "怒", "panel": MORPH_OTHER},
+    "Fun": {"name": "楽", "panel": MORPH_OTHER},
+    "Joy": {"name": "喜", "panel": MORPH_OTHER},
+    "Sorrow": {"name": "哀", "panel": MORPH_OTHER},
+    "Surprised": {"name": "驚", "panel": MORPH_OTHER},
+    "Extra": {"name": "＞＜", "panel": MORPH_EYE},
+    "BrowDownLeft": {"name": "下左", "panel": MORPH_EYEBROW},
+    "BrowDownRight": {"name": "下右", "panel": MORPH_EYEBROW},
+    "BrowInnerUp": {"name": "上", "panel": MORPH_EYEBROW},
+    "BrowOuterUpLeft": {"name": "怒左", "panel": MORPH_EYEBROW},
+    "BrowOuterUpRight": {"name": "怒右", "panel": MORPH_EYEBROW},
+    "CheekPuff": {"name": "ぷくー", "panel": MORPH_LIP},
+    "CheekSquintLeft": {"name": "にやり左", "panel": MORPH_LIP},
+    "CheekSquintRight": {"name": "にやり右", "panel": MORPH_LIP},
+    "EyeBlinkLeft": {"name": "まばたき左", "panel": MORPH_EYE},
+    "EyeBlinkRight": {"name": "まばたき右", "panel": MORPH_EYE},
+    "EyeLookDownLeft": {"name": "目頭下左", "panel": MORPH_EYE},
+    "EyeLookDownRight": {"name": "目頭下右", "panel": MORPH_EYE},
+    "EyeLookInLeft": {"name": "目尻狭左", "panel": MORPH_EYE},
+    "EyeLookInRight": {"name": "目尻狭右", "panel": MORPH_EYE},
+    "EyeLookOutLeft": {"name": "目頭狭左", "panel": MORPH_EYE},
+    "EyeLookOutRight": {"name": "目頭狭右", "panel": MORPH_EYE},
+    "EyeLookUpLeft": {"name": "上左", "panel": MORPH_EYE},
+    "EyeLookUpRight": {"name": "上右", "panel": MORPH_EYE},
+    "EyeSquintLeft": {"name": "笑い左", "panel": MORPH_EYE},
+    "EyeSquintRight": {"name": "笑い右", "panel": MORPH_EYE},
+    "EyeWideLeft": {"name": "驚き左", "panel": MORPH_EYE},
+    "EyeWideRight": {"name": "驚き右", "panel": MORPH_EYE},
+    "JawForward": {"name": "顎前", "panel": MORPH_LIP},
+    "JawLeft": {"name": "顎左", "panel": MORPH_LIP},
+    "JawOpen": {"name": "顎開", "panel": MORPH_LIP},
+    "JawRight": {"name": "顎右", "panel": MORPH_LIP},
+    "MouthClose": {"name": "口閉", "panel": MORPH_LIP},
+    "MouthDimpleLeft": {"name": "引左", "panel": MORPH_LIP},
+    "MouthDimpleRight": {"name": "引右", "panel": MORPH_LIP},
+    "MouthFrownLeft": {"name": "下左", "panel": MORPH_LIP},
+    "MouthFrownRight": {"name": "下右", "panel": MORPH_LIP},
+    "MouthFunnel": {"name": "すぼめる", "panel": MORPH_LIP},
+    "MouthLeft": {"name": "左", "panel": MORPH_LIP},
+    "MouthLowerDownLeft": {"name": "下唇左", "panel": MORPH_LIP},
+    "MouthLowerDownRight": {"name": "下唇右", "panel": MORPH_LIP},
+    "MouthPressLeft": {"name": "口角上左", "panel": MORPH_LIP},
+    "MouthPressRight": {"name": "口角上右", "panel": MORPH_LIP},
+    "MouthPucker": {"name": "すぼめる２", "panel": MORPH_LIP},
+    "MouthRight": {"name": "右", "panel": MORPH_LIP},
+    "MouthRollLower": {"name": "もぐもぐ下", "panel": MORPH_LIP},
+    "MouthRollUpper": {"name": "もぐもぐ上", "panel": MORPH_LIP},
+    "MouthShrugLower": {"name": "引き結ぶ下", "panel": MORPH_LIP},
+    "MouthShrugUpper": {"name": "引き結ぶ上", "panel": MORPH_LIP},
+    "MouthSmileLeft": {"name": "笑い左", "panel": MORPH_LIP},
+    "MouthSmileRight": {"name": "笑い右", "panel": MORPH_LIP},
+    "MouthStretchLeft": {"name": "口角下左", "panel": MORPH_LIP},
+    "MouthStretchRight": {"name": "口角下右", "panel": MORPH_LIP},
+    "MouthUpperUpLeft": {"name": "上唇左", "panel": MORPH_LIP},
+    "MouthUpperUpRight": {"name": "上唇右", "panel": MORPH_LIP},
+    "NoseSneerLeft": {"name": "しかめる左", "panel": MORPH_OTHER},
+    "NoseSneerRight": {"name": "しかめる右", "panel": MORPH_OTHER},
+    "TongueOut": {"name": "舌", "panel": MORPH_LIP},
+}
+
+
+
 
 class BonePanel(BasePanel):
         

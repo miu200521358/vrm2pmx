@@ -3,7 +3,7 @@
 from math import modf
 import struct
 from sys import maxsize
-from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef # noqa
+from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef, VertexMorphOffset, GroupMorphData # noqa
 from utils.MLogger import MLogger # noqa
 import os
 import glob
@@ -273,10 +273,15 @@ class PmxWriter:
                 fout.write(struct.pack(TYPE_INT, len(morph.offsets)))
 
                 for offset in morph.offsets:
-                    fout.write(struct.pack(vertex_idx_type, offset.vertex_index))
-                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.x())))
-                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.y())))
-                    fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.z())))
+                    if type(offset) is VertexMorphOffset:
+                        # 頂点モーフ
+                        fout.write(struct.pack(vertex_idx_type, offset.vertex_index))
+                        fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.x())))
+                        fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.y())))
+                        fout.write(struct.pack(TYPE_FLOAT, float(offset.position_offset.z())))
+                    elif type(offset) is GroupMorphData:
+                        fout.write(struct.pack(morph_idx_type, offset.morph_index))
+                        fout.write(struct.pack(TYPE_FLOAT, float(offset.value)))
 
             logger.info(f"-- モーフデータ出力終了({len(list(pmx.morphs.values()))})")
 
@@ -298,7 +303,13 @@ class PmxWriter:
                         fout.write(struct.pack(TYPE_BYTE, 0))
                         # ボーンIndex
                         fout.write(struct.pack(bone_idx_type, bone_idx))
-                # FIXME モーフ
+                elif display_slot.display_type == 1:
+                    # モーフの場合
+                    for morph_idx in display_slot.references:
+                        # 要素対象 0:ボーン 1:モーフ
+                        fout.write(struct.pack(TYPE_BYTE, 1))
+                        # ボーンIndex
+                        fout.write(struct.pack(morph_idx_type, morph_idx))
 
             logger.info(f"-- 表示枠データ出力終了({len(list(pmx.display_slots.values()))})")
 

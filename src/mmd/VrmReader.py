@@ -12,11 +12,12 @@ import re
 import math
 
 from mmd.VrmData import VrmModel # noqa
-from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, VertexMorphOffset # noqa
+from mmd.PmxData import GroupMorphData, PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, VertexMorphOffset # noqa
 from mmd.PmxReader import PmxReader
 from module.MMath import MRect, MVector2D, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
 from utils.MException import SizingException, MKilledException, MParseException
+from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS
 
 logger = MLogger(__name__, level=1)
 
@@ -40,7 +41,7 @@ class VrmReader(PmxReader):
         self.is_check = is_check
         self.offset = 0
         self.buffer = None
-        self.bone_pairs = {}
+        BONE_PAIRS = {}
 
     def read_model_name(self):
         return ""
@@ -69,10 +70,8 @@ class VrmReader(PmxReader):
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
     
-    def convert_glTF(self, vrm: VrmModel, pmx: PmxModel, output_pmx_path: str, bone_pairs: dict):
+    def convert_glTF(self, vrm: VrmModel, pmx: PmxModel, output_pmx_path: str):
         try:
-            self.bone_pairs = bone_pairs
-
             # テクスチャ用ディレクトリ
             tex_dir_path = os.path.join(str(Path(output_pmx_path).resolve().parents[0]), "tex")
             os.makedirs(tex_dir_path, exist_ok=True)
@@ -193,7 +192,7 @@ class VrmReader(PmxReader):
                                                 # 法線データ
                                                 extra_normals = self.read_from_accessor(vrm, target["NORMAL"])
 
-                                                morph = Morph(extra, extra, 1, 1, 0)
+                                                morph = Morph(extra, extra, 1, 1)
                                                 morph.index = eidx
 
                                                 morph_vertex_idx = vertex_idx
@@ -204,8 +203,9 @@ class VrmReader(PmxReader):
                                                     morph.offsets.append(VertexMorphOffset(morph_vertex_idx, pmx_eposition))
                                                     morph_vertex_idx += 1
 
-                                                pmx.morphs[morph.name] = morph
-                                                pmx.display_slots["表情"].references.append(morph.index)
+                                                pmx.morphs[morph.index] = morph
+                                                # 頂点モーフそのものは表示枠に入れない（グループモーフのみ）
+                                                # pmx.display_slots["表情"].references.append(morph.index)
 
                                         for vidx, (position, normal, uv, joint, weight) in enumerate(zip(positions, normals, uvs, joints, weights)):
                                             pmx_position = position * MIKU_METER * MVector3D(-1, 1, 1)
@@ -385,9 +385,6 @@ class VrmReader(PmxReader):
                                         # 材質がある場合は、面数を加算する
                                         materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
                 
-                # モデル名
-                pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
-
                 # 材質を不透明(OPAQUE)→透明順(BLEND)に並べ替て設定
                 for material_type in ["OPAQUE", "MASK", "BLEND", "Eye"]:
                     if material_type in materials_by_type:
@@ -398,15 +395,33 @@ class VrmReader(PmxReader):
                                 pmx.indices.append(indices_by_material[material.name][midx + 2])
                                 pmx.indices.append(indices_by_material[material.name][midx + 1])
                                 pmx.indices.append(indices_by_material[material.name][midx])
+                
+                # グループモーフ定義
+                if "extensions" in vrm.json_data and vrm.json_data["extensions"] and "VRM" in vrm.json_data["extensions"] \
+                        and "blendShapeMaster" in vrm.json_data["extensions"]["VRM"] and "blendShapeGroups" in vrm.json_data["extensions"]["VRM"]["blendShapeMaster"]:
+                    vertex_morph_cnt = len(pmx.morphs)
+                    for sidx, shape in enumerate(vrm.json_data["extensions"]["VRM"]["blendShapeMaster"]["blendShapeGroups"]):
+                        morph_name = shape["name"]
+                        morph_panel = 4
+                        if shape["name"] in MORPH_PAIRS:
+                            morph_name = MORPH_PAIRS[shape["name"]]["name"]
+                            morph_panel = MORPH_PAIRS[shape["name"]]["panel"]
+                        morph = Morph(morph_name, shape["presetName"], morph_panel, 0)
+                        morph.index = vertex_morph_cnt + sidx
+                        for bind in shape["binds"]:
+                            morph.offsets.append(GroupMorphData(bind["index"], bind["weight"] / 100))
+                        pmx.morphs[morph.index] = morph
+                        pmx.display_slots["表情"].references.append(morph.index)
+                logger.info('-- グループデータ解析')
 
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
                     if "全ての親" == jp_bone_name:
                         continue
 
-                    if bone.english_name in self.bone_pairs:
+                    if bone.english_name in BONE_PAIRS:
                         # MMDボーン定義内の場合
-                        bone_config = self.bone_pairs[bone.english_name]
+                        bone_config = BONE_PAIRS[bone.english_name]
 
                         if not bone_config["display"]:
                             continue
@@ -418,6 +433,9 @@ class VrmReader(PmxReader):
                         if "その他" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
                             pmx.display_slots["その他"] = DisplaySlot("その他", "その他", 0, 0)
                         pmx.display_slots["その他"].references.append(pmx.bones[jp_bone_name].index)
+
+                # モデル名
+                pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
 
             return True
         except MKilledException as ke:
@@ -603,7 +621,7 @@ class VrmReader(PmxReader):
     # ボーンの再定義
     def custom_bones(self, pmx: PmxModel, bones: dict):
         # MMDで定義されているボーン
-        for bone_idx, (node_name, bone_config) in enumerate(self.bone_pairs.items()):
+        for bone_idx, (node_name, bone_config) in enumerate(BONE_PAIRS.items()):
             bone_name = bone_config["name"]
 
             if bone_name in bones:
@@ -613,7 +631,7 @@ class VrmReader(PmxReader):
                 pmx.bones[bone_name] = Bone(bone_name, bone_name, MVector3D(), -1, 0, 0x0000 | 0x0002)
             pmx.bones[bone_name].index = bone_idx
 
-        for bone_idx, (node_name, bone_config) in enumerate(self.bone_pairs.items()):
+        for bone_idx, (node_name, bone_config) in enumerate(BONE_PAIRS.items()):
             bone_name = bone_config["name"]
 
             if bone_name == "全ての親":
@@ -706,7 +724,7 @@ class VrmReader(PmxReader):
         # 人体ボーンの場合のみ人体データ取得
         human_node = None if len(human_nodes) == 0 else human_nodes[0]
         bone_name = human_node["bone"] if human_node else node["name"]
-        jp_bone_name = self.bone_pairs[bone_name]["name"] if bone_name in self.bone_pairs else bone_name
+        jp_bone_name = BONE_PAIRS[bone_name]["name"] if bone_name in BONE_PAIRS else bone_name
 
         if node_idx in node_pairs:
             return jp_bone_name
@@ -725,7 +743,7 @@ class VrmReader(PmxReader):
         #  0x0004  : 移動可能
         #  0x0008  : 表示
         #  0x0010  : 操作可
-        if bone_name in self.bone_pairs:
+        if bone_name in BONE_PAIRS:
             if jp_bone_name[-1] == "先":
                 flag = 0x0001 | 0x0002
             elif jp_bone_name in ["全ての親", "センター", "グルーブ"]:

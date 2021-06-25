@@ -38,7 +38,7 @@ class Vrm2PmxExportService():
             # vrm展開
             logger.info("Vrm展開開始", decoration=MLogger.DECORATION_LINE)
             reader = VrmReader(self.options.vrm_model.path)
-            result = reader.convert_glTF(self.options.vrm_model, pmx, self.options.output_path, self.options.bone_pairs)
+            result = reader.convert_glTF(self.options.vrm_model, pmx, self.options.output_path)
             
             # 最後に出力
             logger.info("PMX出力開始", decoration=MLogger.DECORATION_LINE)
