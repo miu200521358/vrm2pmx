@@ -326,6 +326,43 @@ class PmxWriter:
             # 剛体の数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.rigidbodies.values()))))
 
+            for ridx, rigidbody in enumerate(pmx.rigidbodies.values()):
+                # 剛体名
+                self.write_text(fout, rigidbody.name, f"Rigidbody {ridx}")
+                self.write_text(fout, rigidbody.english_name, f"Rigidbody {ridx}")
+                # ボーンIndex
+                fout.write(struct.pack(bone_idx_type, rigidbody.bone_index))
+                # 1  : byte	| グループ
+                fout.write(struct.pack(TYPE_BYTE, rigidbody.collision_group))
+                # 2  : ushort	| 非衝突グループフラグ
+                fout.write(struct.pack(TYPE_UNSIGNED_SHORT, rigidbody.no_collision_group))
+                # 1  : byte	| 形状 - 0:球 1:箱 2:カプセル
+                fout.write(struct.pack(TYPE_BYTE, rigidbody.shape_type))
+                # 12 : float3	| サイズ(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_size.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_size.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_size.z())))
+                # 12 : float3	| 位置(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_position.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_position.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_position.z())))
+                # 12 : float3	| 回転(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_rotation.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_rotation.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.shape_rotation.z())))
+                # 4  : float	| 質量
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.param.mass)))
+                # 4  : float	| 移動減衰
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.param.linear_damping)))
+                # 4  : float	| 回転減衰
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.param.angular_damping)))
+                # 4  : float	| 反発力
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.param.restitution)))
+                # 4  : float	| 摩擦力
+                fout.write(struct.pack(TYPE_FLOAT, float(rigidbody.param.friction)))
+                # 1  : byte	| 剛体の物理演算 - 0:ボーン追従(static) 1:物理演算(dynamic) 2:物理演算 + Bone位置合わせ
+                fout.write(struct.pack(TYPE_BYTE, rigidbody.mode))
+
             logger.info(f"-- 剛体データ出力終了({len(list(pmx.rigidbodies.values()))})")
 
             # ジョイントの数

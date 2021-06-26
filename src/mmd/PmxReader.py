@@ -334,8 +334,8 @@ class PmxReader:
 
                 logger.info("-- PMX ボーン読み込み完了")
 
-                # ボーンの長さを計算する
-                self.calc_bone_length(pmx.bones, pmx.bone_indexes)
+                # # ボーンの長さを計算する
+                # self.calc_bone_length(pmx.bones, pmx.bone_indexes)
 
                 # 操作パネル (PMD:カテゴリ) 1:眉(左下) 2:目(左上) 3:口(右上) 4:その他(右下)
                 morphs_by_panel = {}

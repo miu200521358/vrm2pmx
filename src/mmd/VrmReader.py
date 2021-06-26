@@ -10,6 +10,8 @@ import numpy as np
 import re
 import math
 
+from numpy.core.defchararray import isdigit
+
 from mmd.VrmData import VrmModel # noqa
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink # noqa
 from mmd.PmxData import Bdef1, Bdef2, Bdef4, VertexMorphOffset, GroupMorphData # noqa
@@ -17,7 +19,7 @@ from mmd.PmxReader import PmxReader # noqa
 from module.MMath import MRect, MVector2D, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
 from utils.MException import SizingException, MKilledException # noqa
-from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS # noqa
+from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS, RIGIDBODY_PAIRS # noqa
 
 logger = MLogger(__name__, level=1)
 
@@ -181,7 +183,11 @@ class VrmReader(PmxReader):
                                             weights = [MVector4D() for _ in range(len(positions))]
 
                                         # 対応するジョイントデータ
-                                        skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
+                                        try:
+                                            skin_joints = vrm.json_data["skins"][[s for s in vrm.json_data["nodes"] if "mesh" in s and s["mesh"] == midx][0]["skin"]]["joints"]
+                                        except:
+                                            # 取れない場合はとりあえず空
+                                            skin_joints = []
                                         
                                         if "extras" in primitive and "targetNames" in primitive["extras"] and "targets" in primitive:
                                             for eidx, (extra, target) in enumerate(zip(primitive["extras"]["targetNames"], primitive["targets"])):
@@ -434,7 +440,83 @@ class VrmReader(PmxReader):
                             pmx.display_slots["表情"].references.append(morph.index)
 
                 logger.info('-- グループモーフデータ解析')
+                
+                bone_vertices = {}
+                # ボーンベースで頂点INDEXの分類
+                for vidx, vertices in pmx.vertices.items():
+                    for vertex in vertices:
+                        for bone_idx in vertex.deform.get_idx_list(0.4):
+                            if bone_idx not in bone_vertices:
+                                bone_vertices[bone_idx] = []
+                            bone = [b for b in pmx.bones.values() if bone_idx == b.index][0]
+                            bone_vertices[bone_idx].append(vertex)
+                            if "捩" in bone.name:
+                                # 捩りは親に入れる
+                                if bone.parent_index not in bone_vertices:
+                                    bone_vertices[bone.parent_index] = []
+                                bone_vertices[bone.parent_index].append(vertex)
+                            elif bone.getExternalRotationFlag():
+                                # 回転付与の場合、付与親に入れる
+                                if bone.effect_index not in bone_vertices:
+                                    bone_vertices[bone.effect_index] = []
+                                bone_vertices[bone.effect_index].append(vertex)
 
+                # 髪の再命名
+                hair_idx = 1
+                for bone_name, bone in pmx.bones.items():
+                    if "HairJoint" in bone_name:
+                        if bone.parent_index == pmx.bones["頭"].index:
+                            # 頭に直接ついてるボーンの場合、hair_idx加算
+                            bone.name = f"髪_{hair_idx:02d}_01"
+                            hair_idx += 1
+                        elif bone.parent_index >= 0:
+                            # 頭についてない場合は、親の名前を継承
+                            parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0]
+                            parent_suffix = int(parent_bone.name[-2:])
+                            bone.name = f"{parent_bone.name[:4]}_{(parent_suffix + 1):02d}"
+
+                # MMDモデル定義ベースの剛体
+                for node_name, bone_config in BONE_PAIRS.items():
+                    bone_name = bone_config["name"]
+                    
+                    if bone_config["rigidBody"] is not None:
+                        rigidbody_no_collisions = 0
+                        for nc in range(16):
+                            if nc not in bone_config["rigidbodyNoCollisions"]:
+                                rigidbody_no_collisions |= 1 << nc
+                        self.create_rigidbody(pmx, bone_name, bone_vertices, bone_config["rigidBody"], bone_config["rigidbodyMode"], bone_config["rigidbodyFactor"], \
+                                              bone_config["rigidbodyCollisions"], rigidbody_no_collisions, bone_config["rigidbodyParam"])
+                
+                for bone_name, bone in pmx.bones.items():
+                    if bone.name not in pmx.rigidbodies and "捩" not in bone.name and not bone.getExternalRotationFlag() and bone.index in bone_vertices:
+                        bone_config = [b for b in BONE_PAIRS.values() if bone.name == b["name"]]
+                        # MMDモデル定義外の剛体
+                        if len(bone_config) == 0:
+                            rigidbodies = [rv for rk, rv in RIGIDBODY_PAIRS.items() if rk in bone.name]
+                            rigidbody_mode = 2
+                            parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0] if bone.parent_index >= 0 else None
+                            rigidbody_param = rigidbodies[0]["rigidbodyParam"] if len(rigidbodies) > 0 else []
+                            if not parent_bone or parent_bone.name in BONE_PAIRS or parent_bone.name not in pmx.rigidbodies or \
+                               (parent_bone.name in pmx.rigidbodies and pmx.rigidbodies[parent_bone.name].mode == 0 and \
+                                    (not bone.name[-1].isdigit() or (bone.name[-1].isdigit() and int(bone.name[-1]) in [0, 1]))):
+                                # MMDモデル定義ボーンに繋がってる場合・親ボーンに剛体がない場合・親剛体がボーン追従剛体の場合、ボーン追従剛体
+                                rigidbody_mode = 0
+                            else:
+                                # 物理合わせの場合、親より少し小さくする
+                                parent_param = pmx.rigidbodies[parent_bone.name].param
+                                rigidbody_param = (np.array([parent_param.mass, parent_param.linear_damping, parent_param.angular_damping, \
+                                                             parent_param.restitution, parent_param.friction]) * np.array([0.8, 0.8, 0.8, 10, 2])).tolist()
+                            rigid_factor = rigidbodies[0]["rigidbodyFactor"] if len(rigidbodies) > 0 else 0.5
+                            rigidbody_collision = rigidbodies[0]["rigidbodyCollisions"] if len(rigidbodies) > 0 else 9
+                            rigidbody_no_collisions = 0
+                            rigidbody_no_collisions_list = rigidbodies[0]["rigidbodyNoCollisions"] if len(rigidbodies) > 0 else []
+                            for nc in range(16):
+                                if nc not in rigidbody_no_collisions_list:
+                                    rigidbody_no_collisions |= 1 << nc
+                            self.create_rigidbody(pmx, bone_name, bone_vertices, 2, rigidbody_mode, rigid_factor, rigidbody_collision, rigidbody_no_collisions, rigidbody_param)
+
+                logger.info('-- 剛体データ解析')
+                
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
                     if "全ての親" == jp_bone_name:
@@ -450,11 +532,17 @@ class VrmReader(PmxReader):
                             pmx.display_slots[bone_config["display"]] = DisplaySlot(bone_config["display"], bone_config["display"], 0, 0)
 
                         pmx.display_slots[bone_config["display"]].references.append(pmx.bones[jp_bone_name].index)
+                    elif "髪" in bone.name:
+                        if "髪" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
+                            pmx.display_slots["髪"] = DisplaySlot("髪", "髪", 0, 0)
+                        pmx.display_slots["髪"].references.append(pmx.bones[jp_bone_name].index)
                     elif bone.getManipulatable():
                         if "その他" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
                             pmx.display_slots["その他"] = DisplaySlot("その他", "その他", 0, 0)
                         pmx.display_slots["その他"].references.append(pmx.bones[jp_bone_name].index)
 
+                logger.info('-- 表示枠データ解析')
+                
                 # モデル名
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
 
@@ -469,6 +557,74 @@ class VrmReader(PmxReader):
             import traceback
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
+    
+    def create_rigidbody(self, pmx: PmxModel, bone_name: str, bone_vertices: dict, rigidbody_type: int, rigidbody_mode: int, rigidbody_factor: float, \
+                         collision_group: int, no_collision_group: int, rigidbody_param: list):
+        # 剛体が必要な場合
+        bone = pmx.bones[bone_name]
+        # ボーンに紐付く頂点リストを取得
+        vertex_list = []
+        for vertex in bone_vertices[bone.index]:
+            vertex_list.append(vertex.position.data().tolist())
+        vertex_ary = np.array(vertex_list)
+        # 最小
+        min_vertex = np.min(vertex_ary, axis=0)
+        # 最大
+        max_vertex = np.max(vertex_ary, axis=0)
+        # 中央
+        center_vertex = np.median(vertex_ary, axis=0)
+        # サイズ
+        diff_size = np.abs(max_vertex - min_vertex)
+        shape_size = MVector3D()
+        shape_rotation = MVector3D()
+        if rigidbody_type == 0:
+            # 球体
+            if "頭" == bone.name:
+                # 頭はエルフ耳がある場合があるので、両目の間隔を使う
+                eye_length = pmx.bones["右目"].position.distanceToPoint(pmx.bones["左目"].position)
+                center_vertex[0] = bone.position.x()
+                center_vertex[1] = min_vertex[1] + (max_vertex[1] - min_vertex[1]) / 2
+                shape_size = MVector3D(eye_length * rigidbody_factor, eye_length, eye_length)
+            else:
+                # それ以外（胸とか）はそのまま
+                max_size = np.max(diff_size) * rigidbody_factor
+                shape_size = MVector3D(max_size, max_size, max_size)
+        else:
+            # カプセルと箱
+            # ボーンの向き先に沿う
+            if bone.tail_index > 0:
+                tail_bone = [b for b in pmx.bones.values() if bone.tail_index == b.index][0]
+                tail_position = tail_bone.position
+            else:
+                tail_position = bone.tail_position + bone.position
+            # 軸の方向
+            diff_length = (tail_position - bone.position).abs()
+            axis_vec = tail_position - bone.position
+            tail_vec = axis_vec.normalized().data()
+            diff_vec = MVector3D(diff_size).normalized().data()
+            # 回転量
+            rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
+            tail_vec_idx = np.argmax(np.abs(diff_vec))
+            shape_euler = rot.toEulerAngles()
+            shape_rotation = MVector3D(math.radians(shape_euler.x()), math.radians(shape_euler.y()), math.radians(shape_euler.z()))
+            if tail_vec_idx == 0:
+                # X軸方向に伸びてる場合 / 半径：Y, 高さ：X
+                shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length.x(), diff_size[2])
+            elif tail_vec_idx == 1:
+                # Y軸方向に伸びてる場合 / 半径：X, 高さ：Y
+                shape_size = MVector3D(diff_size[0] * rigidbody_factor, diff_length.y(), diff_size[2])
+            else:
+                # Z軸方向に伸びてる場合 / 半径：Y, 高さ：Z
+                shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length.z(), diff_size[0])
+            shape_size.setY(max(0.2, shape_size.y() - shape_size.x()))
+            if "足首" not in bone.name:
+                center_vertex = bone.position + (tail_position - bone.position) / 2
+
+        logger.debug("bone: %s, min: %s, max: %s, center: %s", bone.name, min_vertex, max_vertex, center_vertex)
+        rigidbody = RigidBody(bone.name, bone.english_name, bone.index, collision_group, no_collision_group, \
+                              rigidbody_type, shape_size, MVector3D(center_vertex), shape_rotation, \
+                              rigidbody_param[0], rigidbody_param[1], rigidbody_param[2], rigidbody_param[3], rigidbody_param[4], rigidbody_mode)
+        pmx.rigidbodies[rigidbody.name] = rigidbody
     
     def create_bone_arm_twist(self, pmx: PmxModel, direction: str):
         shoulder_name = f'{direction}肩'
@@ -602,8 +758,8 @@ class VrmReader(PmxReader):
         # 尻は下半身に統合
         dest_joints = np.where(dest_joints == pmx.bones["腰"].index, pmx.bones["下半身"].index, dest_joints)
         
-        # 足・ひざ・足首はそれぞれDに載せ替え
         for direction in ["右", "左"]:
+            # 足・ひざ・足首はそれぞれDに載せ替え
             for dest_bone_name in [f'{direction}足', f'{direction}ひざ', f'{direction}足首']:
                 src_bone_name = f'{dest_bone_name}D'
                 dest_joints = np.where(dest_joints == pmx.bones[dest_bone_name].index, pmx.bones[src_bone_name].index, dest_joints)
@@ -685,28 +841,32 @@ class VrmReader(PmxReader):
             del joint_values[remove_idx]
             del weight_values[remove_idx]
 
+            # 正規化(合計して1になるように)
+            total_weights = np.array(weight_values)
+            weight_values = (total_weights / total_weights.sum(axis=0, keepdims=1)).tolist()
+
         return joint_values, weight_values
     
     # ボーンの再定義
     def custom_bones(self, pmx: PmxModel, bones: dict):
         # MMDで定義されているボーン
         bone_idx = 0
-        for node_names, bone_config in BONE_PAIRS.items():
+        for node_name, bone_config in BONE_PAIRS.items():
             bone_name = bone_config["name"]
 
             if bone_name in bones:
                 pmx.bones[bone_name] = bones[bone_name]
             else:
                 # ない場合とりあえず初期値
-                pmx.bones[bone_name] = Bone(bone_name, node_names[0], MVector3D(), -1, 0, 0x0000 | 0x0002)
+                pmx.bones[bone_name] = Bone(bone_name, node_name, MVector3D(), -1, 0, 0x0000 | 0x0002)
             pmx.bones[bone_name].index = bone_idx
             bone_idx += 1
 
-        for node_names, bone_config in BONE_PAIRS.items():
+        for node_name, bone_config in BONE_PAIRS.items():
             bone_name = bone_config["name"]
 
             pmx.bones[bone_name].name = bone_name
-            pmx.bones[bone_name].english_name = node_names[0]
+            pmx.bones[bone_name].english_name = node_name
 
             # 親ボーンの設定
             if bone_config["parent"]:
@@ -751,6 +911,9 @@ class VrmReader(PmxReader):
                 if pmx.bones[bone_name].position == MVector3D():
                     # 指先の値が入ってない場合、とりあえず-1
                     pmx.bones[bone_name].position = pmx.bones[bone_config["parent"]].position + MVector3D(1 * np.sign(pmx.bones[bone_config["parent"]].position.x()), 0, 0)
+            elif "胸先" in bone_name[-2:]:
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D()
             elif "腕捩" in bone_name[-2:]:
                 self.create_bone_arm_twist(pmx, bone_name[0])
             elif "手捩" in bone_name[-2:]:
@@ -786,6 +949,10 @@ class VrmReader(PmxReader):
             elif "足先EX" == bone_name[1:]:
                 pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
                 pmx.bones[bone_name].layer = 1
+            elif "下半身" == bone_name:
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = pmx.bones[bone_name].position - pmx.bones["腰"].position
         
         # MMDで定義されていないボーン類
         for bone_name, bone in bones.items():
@@ -801,12 +968,8 @@ class VrmReader(PmxReader):
                 # 子ボーンが定義可能な場合は＋1
                 if bone.tail_index != -1:
                     bone.tail_index = bone.index + 1
-                # 定義
-                pmx.bones[bone.name] = bone
-        
-        for bone_idx, (bone_name, bone) in enumerate(pmx.bones.items()):
-            if bone.index != bone_idx:
-                bone.index = bone_idx
+                
+                pmx.bones[bone_name] = bone
 
     def define_bone(self, vrm: VrmModel, bones: dict, node_idx: int, parent_name: str, node_pairs: dict):
         node = vrm.json_data["nodes"][node_idx]
@@ -842,9 +1005,9 @@ class VrmReader(PmxReader):
             else:
                 flag = 0x0001 | 0x0002 | 0x0008 | 0x0010
         elif human_node or "mesh" in node:
-            flag = 0x0001 | 0x0002 | 0x0004
+            flag = 0x0001 | 0x0002
         else:
-            flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+            flag = 0x0001 | 0x0002 | 0x0008 | 0x0010
 
         bone = Bone(jp_bone_name, bone_name, position, parent_name, 0, flag)
         bones[bone.name] = bone
