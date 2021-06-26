@@ -230,6 +230,16 @@ class PmxWriter:
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.fixed_axis.y())))
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.fixed_axis.z())))
 
+                if bone.getLocalCoordinateFlag():
+                    # ローカルX
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_x_vector.x())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_x_vector.y())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_x_vector.z())))
+                    # ローカルZ
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.x())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.y())))
+                    fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.z())))
+
                 if bone.getIkFlag():
                     # IKボーン
                     # n  : ボーンIndexサイズ  | IKターゲットボーンのボーンIndex

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 #
 from PIL import Image, ImageChops
-import glob
 import struct
 import os
 import json
@@ -12,12 +11,13 @@ import re
 import math
 
 from mmd.VrmData import VrmModel # noqa
-from mmd.PmxData import GroupMorphData, PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, VertexMorphOffset # noqa
-from mmd.PmxReader import PmxReader
+from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink # noqa
+from mmd.PmxData import Bdef1, Bdef2, Bdef4, VertexMorphOffset, GroupMorphData # noqa
+from mmd.PmxReader import PmxReader # noqa
 from module.MMath import MRect, MVector2D, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
-from utils.MException import SizingException, MKilledException, MParseException
-from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS
+from utils.MException import SizingException, MKilledException # noqa
+from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS # noqa
 
 logger = MLogger(__name__, level=1)
 
@@ -41,7 +41,6 @@ class VrmReader(PmxReader):
         self.is_check = is_check
         self.offset = 0
         self.buffer = None
-        BONE_PAIRS = {}
 
     def read_model_name(self):
         return ""
@@ -269,7 +268,8 @@ class VrmReader(PmxReader):
 
                                         if pidx % 5 == 0:
                                             logger.info(f'-- 面データ解析[{primitive["indices"]}]')
-                                        logger.test(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, {len(indices)}/{len(indices_by_material[vrm_material["name"]])}')
+                                        logger.test(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, ' \
+                                                    f'{len(indices)}/{len(indices_by_material[vrm_material["name"]])}')
 
                                     if vrm_material["alphaMode"] not in materials_by_type or vrm_material["name"] not in materials_by_type[vrm_material["alphaMode"]]:
                                         # 材質種別別に材質の存在がない場合
@@ -440,7 +440,7 @@ class VrmReader(PmxReader):
                     if "全ての親" == jp_bone_name:
                         continue
 
-                    if bone.english_name in BONE_PAIRS:
+                    if bone.english_name in BONE_PAIRS or bone.name in BONE_PAIRS:
                         # MMDボーン定義内の場合
                         bone_config = BONE_PAIRS[bone.english_name]
 
@@ -450,7 +450,7 @@ class VrmReader(PmxReader):
                             pmx.display_slots[bone_config["display"]] = DisplaySlot(bone_config["display"], bone_config["display"], 0, 0)
 
                         pmx.display_slots[bone_config["display"]].references.append(pmx.bones[jp_bone_name].index)
-                    else:
+                    elif bone.getManipulatable():
                         if "その他" not in pmx.display_slots and pmx.bones[jp_bone_name].getManipulatable():
                             pmx.display_slots["その他"] = DisplaySlot("その他", "その他", 0, 0)
                         pmx.display_slots["その他"].references.append(pmx.bones[jp_bone_name].index)
@@ -471,11 +471,39 @@ class VrmReader(PmxReader):
             raise e
     
     def create_bone_arm_twist(self, pmx: PmxModel, direction: str):
+        shoulder_name = f'{direction}肩'
         arm_name = f'{direction}腕'
         elbow_name = f'{direction}ひじ'
         arm_twist_name = f'{direction}腕捩'
+        wrist_name = f'{direction}手首'
 
         if arm_name in pmx.bones and elbow_name in pmx.bones:
+            local_y_vector = MVector3D(0, -1, 0)
+
+            # 肩
+            shoulder_bone = pmx.bones[shoulder_name]
+            shoulder_bone.flag |= 0x0800
+            shoulder_bone.local_x_vector = (pmx.bones[arm_name].position - pmx.bones[shoulder_name].position).normalized()
+            shoulder_bone.local_z_vector = MVector3D.crossProduct(shoulder_bone.local_x_vector, local_y_vector)
+
+            # 腕
+            arm_bone = pmx.bones[arm_name]
+            arm_bone.flag |= 0x0800
+            arm_bone.local_x_vector = (pmx.bones[elbow_name].position - pmx.bones[arm_name].position).normalized()
+            arm_bone.local_z_vector = MVector3D.crossProduct(arm_bone.local_x_vector, local_y_vector)
+
+            # ひじ
+            elbow_bone = pmx.bones[elbow_name]
+            elbow_bone.flag |= 0x0800
+            elbow_bone.local_x_vector = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            elbow_bone.local_z_vector = MVector3D.crossProduct(elbow_bone.local_x_vector, local_y_vector)
+
+            # 手首
+            wrist_bone = pmx.bones[wrist_name]
+            wrist_bone.flag |= 0x0800
+            wrist_bone.local_x_vector = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            wrist_bone.local_z_vector = MVector3D.crossProduct(wrist_bone.local_x_vector, local_y_vector)
+
             # 腕捩
             arm_twist_bone = pmx.bones[arm_twist_name]
             arm_twist_bone.position = pmx.bones[arm_name].position + (pmx.bones[elbow_name].position - pmx.bones[arm_name].position) * 0.5
@@ -612,7 +640,8 @@ class VrmReader(PmxReader):
                                     dest_joints = np.append(dest_joints, pmx.bones[dest_to_bone_name].index)
                                     org_weights = np.append(org_weights, arm_twist_weights)
 
-                                    logger.test("[%s] from: %s, to: %s, factor: %s, dest_joints: %s, org_weights: %s", vertex_idx, dest_from_bone_name, dest_to_bone_name, arm_twist_factor, dest_joints, org_weights)
+                                    logger.test("[%s] from: %s, to: %s, factor: %s, dest_joints: %s, org_weights: %s", \
+                                                vertex_idx, dest_from_bone_name, dest_to_bone_name, arm_twist_factor, dest_joints, org_weights)
 
         # 載せ替えた事で、ジョイントが重複している場合があるので、調整する
         joint_weights = {}
@@ -669,7 +698,8 @@ class VrmReader(PmxReader):
                                             pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0008 | 0x0010, MVector3D())
             elif "肩C" in bone_name:
                 pmx.bones[bone_name] = Bone(bone_name, node_name, pmx.bones[bone_name[:-1]].position, \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0100, MVector3D(), effect_index=pmx.bones[bone_name.replace("C", "P")].index, effect_factor=-1)
+                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0100, MVector3D(), \
+                                            effect_index=pmx.bones[bone_name.replace("C", "P")].index, effect_factor=-1)
             elif "指先" in bone_name[-2:]:
                 if pmx.bones[bone_name].position == MVector3D():
                     # 指先の値が入ってない場合、とりあえず-1
@@ -829,7 +859,7 @@ class VrmReader(PmxReader):
                             if aidx % 5000 == 0:
                                 logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
                             else:
-                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+                                logger.test("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                     elif acc_type == "VEC2":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
@@ -850,7 +880,7 @@ class VrmReader(PmxReader):
                             if aidx % 5000 == 0:
                                 logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
                             else:
-                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+                                logger.test("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                     elif acc_type == "VEC4":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
@@ -876,7 +906,7 @@ class VrmReader(PmxReader):
                             if aidx % 5000 == 0:
                                 logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
                             else:
-                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+                                logger.test("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                     elif acc_type == "SCALAR":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
@@ -897,7 +927,7 @@ class VrmReader(PmxReader):
                             if aidx % 5000 == 0:
                                 logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
                             else:
-                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+                                logger.test("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
         return bresult
 
