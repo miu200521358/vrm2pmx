@@ -508,8 +508,10 @@ class VrmReader(PmxReader):
             arm_twist_bone = pmx.bones[arm_twist_name]
             arm_twist_bone.position = pmx.bones[arm_name].position + (pmx.bones[elbow_name].position - pmx.bones[arm_name].position) * 0.5
             arm_twist_bone.parent_index = pmx.bones[arm_name].index
-            arm_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400
+            arm_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400 | 0x0800
             arm_twist_bone.fixed_axis = (pmx.bones[elbow_name].position - pmx.bones[arm_name].position).normalized()
+            arm_twist_bone.local_x_vector = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            arm_twist_bone.local_z_vector = MVector3D.crossProduct(arm_twist_bone.local_x_vector, local_y_vector)
             
             # 腕捩内部
             for twist_idx, factor in [(1, 0.25), (2, 0.5), (3, 0.75)]:
@@ -527,12 +529,16 @@ class VrmReader(PmxReader):
         wrist_twist_name = f'{direction}手捩'
 
         if elbow_name in pmx.bones and wrist_name in pmx.bones:
+            local_y_vector = MVector3D(0, -1, 0)
+
             # 手捩
             wrist_twist_bone = pmx.bones[wrist_twist_name]
             wrist_twist_bone.position = pmx.bones[elbow_name].position + (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position) * 0.5
             wrist_twist_bone.parent_index = pmx.bones[elbow_name].index
-            wrist_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400
+            wrist_twist_bone.flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0400 | 0x0800
             wrist_twist_bone.fixed_axis = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            wrist_twist_bone.local_x_vector = (pmx.bones[wrist_name].position - pmx.bones[elbow_name].position).normalized()
+            wrist_twist_bone.local_z_vector = MVector3D.crossProduct(wrist_twist_bone.local_x_vector, local_y_vector)
             
             # 手捩内部
             for twist_idx, factor in [(1, 0.25), (2, 0.5), (3, 0.75)]:
