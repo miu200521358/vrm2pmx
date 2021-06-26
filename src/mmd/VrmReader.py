@@ -240,8 +240,8 @@ class VrmReader(PmxReader):
 
                                         logger.info(f'-- 頂点データ解析[{primitive["material"]}-{primitive["attributes"]["NORMAL"]}-{primitive["attributes"]["TEXCOORD_0"]}]')
 
-                                        logger.debug(f'{midx}-{pidx}: start({pmx.vertices[primitive["material"]][0].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][:3]]}')
-                                        logger.debug(f'{midx}-{pidx}: end({pmx.vertices[primitive["material"]][-1].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][-3:-1]]}')
+                                        logger.test(f'{midx}-{pidx}: start({pmx.vertices[primitive["material"]][0].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][:3]]}')
+                                        logger.test(f'{midx}-{pidx}: end({pmx.vertices[primitive["material"]][-1].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][-3:-1]]}')
                                     
                 hair_regexp = r'((F\d+_\d+_Hair_\d+)_HAIR_\d+)'
 
@@ -252,7 +252,7 @@ class VrmReader(PmxReader):
                                 if "material" in primitive and "materials" in vrm.json_data and primitive["material"] < len(vrm.json_data["materials"]):
                                     # 材質データ
                                     vrm_material = vrm.json_data["materials"][primitive["material"]]
-                                    logger.debug(f'material: {primitive["material"]} -> {vrm_material["name"]}')
+                                    logger.test(f'material: {primitive["material"]} -> {vrm_material["name"]}')
 
                                     if "indices" in primitive:
                                         # 面データ
@@ -265,10 +265,11 @@ class VrmReader(PmxReader):
                                             indices_by_material[vrm_material["name"]].append(vertex_idx)
                                             
                                             if iidx < 3 or iidx > len(indices) - 4:
-                                                logger.debug(f'{iidx}: {index} -> {vertex_idx}')
+                                                logger.test(f'{iidx}: {index} -> {vertex_idx}')
 
-                                        logger.info(f'-- 面データ解析[{primitive["indices"]}]')
-                                        logger.debug(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, {len(indices)}/{len(indices_by_material[vrm_material["name"]])}')
+                                        if pidx % 5 == 0:
+                                            logger.info(f'-- 面データ解析[{primitive["indices"]}]')
+                                        logger.test(f'{midx}-{pidx}: indices: {primitive["indices"]} {indices[:9]} max: {max(indices)}, {len(indices)}/{len(indices_by_material[vrm_material["name"]])}')
 
                                     if vrm_material["alphaMode"] not in materials_by_type or vrm_material["name"] not in materials_by_type[vrm_material["alphaMode"]]:
                                         # 材質種別別に材質の存在がない場合
@@ -399,20 +400,40 @@ class VrmReader(PmxReader):
                 # グループモーフ定義
                 if "extensions" in vrm.json_data and vrm.json_data["extensions"] and "VRM" in vrm.json_data["extensions"] \
                         and "blendShapeMaster" in vrm.json_data["extensions"]["VRM"] and "blendShapeGroups" in vrm.json_data["extensions"]["VRM"]["blendShapeMaster"]:
-                    vertex_morph_cnt = len(pmx.morphs)
                     for sidx, shape in enumerate(vrm.json_data["extensions"]["VRM"]["blendShapeMaster"]["blendShapeGroups"]):
+                        if len(shape["binds"]) == 0:
+                            continue
+
                         morph_name = shape["name"]
                         morph_panel = 4
                         if shape["name"] in MORPH_PAIRS:
                             morph_name = MORPH_PAIRS[shape["name"]]["name"]
                             morph_panel = MORPH_PAIRS[shape["name"]]["panel"]
-                        morph = Morph(morph_name, shape["presetName"], morph_panel, 0)
-                        morph.index = vertex_morph_cnt + sidx
-                        for bind in shape["binds"]:
-                            morph.offsets.append(GroupMorphData(bind["index"], bind["weight"] / 100))
-                        pmx.morphs[morph.index] = morph
+                        morph = Morph(morph_name, shape["name"], morph_panel, 0)
+                        morph.index = len(pmx.morphs)
+                        
+                        if "binds" in MORPH_PAIRS[shape["name"]]:
+                            for bind in MORPH_PAIRS[shape["name"]]["binds"]:
+                                morph.offsets.append(GroupMorphData(pmx.morphs[bind].index, 1))
+                        else:
+                            for bind in shape["binds"]:
+                                morph.offsets.append(GroupMorphData(bind["index"], bind["weight"] / 100))
+                        pmx.morphs[morph_name] = morph
                         pmx.display_slots["表情"].references.append(morph.index)
-                logger.info('-- グループデータ解析')
+
+                    for sidx, (morph_name, morph_pair) in enumerate(MORPH_PAIRS.items()):
+                        if "binds" in morph_pair:
+                            morph = Morph(morph_pair["name"], morph_pair["name"], morph_pair["panel"], 0)
+                            morph.index = len(pmx.morphs)
+                            for bind_name in morph_pair["binds"]:
+                                if bind_name in pmx.morphs:
+                                    bind_morph = pmx.morphs[bind_name]
+                                    for group_morph in bind_morph.offsets:
+                                        morph.offsets.append(GroupMorphData(group_morph.morph_index, group_morph.value))
+                            pmx.morphs[morph_pair["name"]] = morph
+                            pmx.display_slots["表情"].references.append(morph.index)
+
+                logger.info('-- グループモーフデータ解析')
 
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
@@ -755,7 +776,7 @@ class VrmReader(PmxReader):
         else:
             flag = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010
 
-        bone = Bone(jp_bone_name, node["name"], position, parent_name, 0, flag)
+        bone = Bone(jp_bone_name, bone_name, position, parent_name, 0, flag)
         bones[bone.name] = bone
 
         if "children" in node:
@@ -776,16 +797,19 @@ class VrmReader(PmxReader):
     # https://github.com/ft-lab/Documents_glTF/blob/master/structure.md
     def read_from_accessor(self, vrm: VrmModel, accessor_idx: int):
         bresult = None
-        if accessor_idx < len(vrm.json_data['accessors']):
+        aidx = 0
+        if accessor_idx < len(vrm.json_data['accessors']):            
             accessor = vrm.json_data['accessors'][accessor_idx]
-            acc_type = accessor['type']
+            acc_type = accessor['type']                        
             if accessor['bufferView'] < len(vrm.json_data['bufferViews']):
                 buffer = vrm.json_data['bufferViews'][accessor['bufferView']]
-                logger.debug('accessor: %s, %s', accessor_idx, buffer)
+                logger.test('accessor: %s, %s', accessor_idx, buffer)
                 if 'count' in accessor:
                     bresult = []
                     if acc_type == "VEC3":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
+                        if accessor_idx % 10 == 0:
+                            logger.info("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 3) * n)
@@ -799,10 +823,18 @@ class VrmReader(PmxReader):
                                 bresult.append(MVector3D(float(xresult[0]), float(yresult[0]), float(zresult[0])))
                             else:
                                 bresult.append(MVector3D(int(xresult[0]), int(yresult[0]), int(zresult[0])))
-                        logger.debug("-- -- Accessor[%s/Vec3/%s]", accessor_idx, buf_type)
                             
+                            aidx += 1
+
+                            if aidx % 5000 == 0:
+                                logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
+                            else:
+                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+
                     elif acc_type == "VEC2":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
+                        if accessor_idx % 10 == 0:
+                            logger.info("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 2) * n)
@@ -812,10 +844,18 @@ class VrmReader(PmxReader):
                             yresult = struct.unpack_from(buf_type, self.buffer, buf_start + buf_num)
 
                             bresult.append(MVector2D(float(xresult[0]), float(yresult[0])))
-                        logger.debug("-- -- Accessor[%s/Vec3/%s]", accessor_idx, buf_type)
                             
+                            aidx += 1
+
+                            if aidx % 5000 == 0:
+                                logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
+                            else:
+                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+
                     elif acc_type == "VEC4":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
+                        if accessor_idx % 10 == 0:
+                            logger.info("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + ((buf_num * 4) * n)
@@ -830,10 +870,18 @@ class VrmReader(PmxReader):
                                 bresult.append(MVector4D(float(xresult[0]), float(yresult[0]), float(zresult[0]), float(wresult[0])))
                             else:
                                 bresult.append(MVector4D(int(xresult[0]), int(yresult[0]), int(zresult[0]), int(wresult[0])))
-                        logger.debug("-- -- Accessor[%s/Vec4/%s]", accessor_idx, buf_type)
                             
+                            aidx += 1
+
+                            if aidx % 5000 == 0:
+                                logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
+                            else:
+                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
+
                     elif acc_type == "SCALAR":
                         buf_type, buf_num = self.define_buf_type(accessor['componentType'])
+                        if accessor_idx % 10 == 0:
+                            logger.info("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
                         for n in range(accessor['count']):
                             buf_start = self.offset + buffer["byteOffset"] + (buf_num * n)
@@ -843,7 +891,13 @@ class VrmReader(PmxReader):
                                 bresult.append(float(xresult[0]))
                             else:
                                 bresult.append(int(xresult[0]))
-                        logger.debug("-- -- Accessor[%s/Scalar/%s]", accessor_idx, buf_type)
+                            
+                            aidx += 1
+
+                            if aidx % 5000 == 0:
+                                logger.info("-- -- Accessor[%s/%s/%s][%s]", accessor_idx, acc_type, buf_type, aidx)
+                            else:
+                                logger.debug("-- -- Accessor[%s/%s/%s]", accessor_idx, acc_type, buf_type)
 
         return bresult
 
