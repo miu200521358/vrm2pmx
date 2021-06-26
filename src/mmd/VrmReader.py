@@ -565,13 +565,25 @@ class VrmReader(PmxReader):
             leg_ik_link.append(IkLink(pmx.bones[knee_name].index, 1, MVector3D(math.radians(-180), 0, 0), MVector3D(math.radians(-0.5), 0, 0)))
             leg_ik_link.append(IkLink(pmx.bones[leg_name].index, 0))
             leg_ik = Ik(pmx.bones[ankle_name].index, 40, 2, leg_ik_link)
-            leg_ik_bone = Bone(leg_ik_name, leg_ik_name, pmx.bones[ankle_name].position, "全ての親", 1, flag, MVector3D(0, 0, 1), ik=leg_ik)
+            leg_ik_bone = pmx.bones[leg_ik_name]
+            leg_ik_bone.position = pmx.bones[ankle_name].position
+            leg_ik_bone.parent_index = 0
+            leg_ik_bone.layer = 1
+            leg_ik_bone.flag = flag
+            leg_ik_bone.tail_position = MVector3D(0, 0, 1)
+            leg_ik_bone.ik = leg_ik
             pmx.bones[leg_ik_bone.name] = leg_ik_bone
 
             toe_ik_link = []
             toe_ik_link.append(IkLink(pmx.bones[ankle_name].index, 0))
             toe_ik = Ik(pmx.bones[toe_name].index, 3, 4, toe_ik_link)
-            toe_ik_bone = Bone(toe_ik_name, toe_ik_name, pmx.bones[toe_name].position, pmx.bones[leg_ik_bone.name].name, 1, flag, MVector3D(0, -1, 0), ik=toe_ik)
+            toe_ik_bone = pmx.bones[toe_ik_name]
+            toe_ik_bone.position = pmx.bones[toe_name].position
+            toe_ik_bone.parent_index = leg_ik_bone.index
+            toe_ik_bone.layer = 1
+            toe_ik_bone.flag = flag
+            toe_ik_bone.tail_position = MVector3D(0, -1, 0)
+            toe_ik_bone.ik = toe_ik
             pmx.bones[toe_ik_bone.name] = toe_ik_bone
     
     def get_deform_index(self, vertex_idx: int, pmx: PmxModel, vertex_pos: MVector3D, joint: list, skin_joints: list, node_pairs: dict, node_weight: list):
@@ -589,6 +601,7 @@ class VrmReader(PmxReader):
 
         # 尻は下半身に統合
         dest_joints = np.where(dest_joints == pmx.bones["腰"].index, pmx.bones["下半身"].index, dest_joints)
+        
         # 足・ひざ・足首はそれぞれDに載せ替え
         for direction in ["右", "左"]:
             for dest_bone_name in [f'{direction}足', f'{direction}ひざ', f'{direction}足首']:
@@ -677,35 +690,63 @@ class VrmReader(PmxReader):
     # ボーンの再定義
     def custom_bones(self, pmx: PmxModel, bones: dict):
         # MMDで定義されているボーン
-        for bone_idx, (node_name, bone_config) in enumerate(BONE_PAIRS.items()):
+        bone_idx = 0
+        for node_names, bone_config in BONE_PAIRS.items():
             bone_name = bone_config["name"]
 
             if bone_name in bones:
                 pmx.bones[bone_name] = bones[bone_name]
             else:
                 # ない場合とりあえず初期値
-                pmx.bones[bone_name] = Bone(bone_name, bone_name, MVector3D(), -1, 0, 0x0000 | 0x0002)
+                pmx.bones[bone_name] = Bone(bone_name, node_names[0], MVector3D(), -1, 0, 0x0000 | 0x0002)
             pmx.bones[bone_name].index = bone_idx
+            bone_idx += 1
 
-        for bone_idx, (node_name, bone_config) in enumerate(BONE_PAIRS.items()):
+        for node_names, bone_config in BONE_PAIRS.items():
             bone_name = bone_config["name"]
 
+            pmx.bones[bone_name].name = bone_name
+            pmx.bones[bone_name].english_name = node_names[0]
+
+            # 親ボーンの設定
+            if bone_config["parent"]:
+                pmx.bones[bone_name].parent_index = pmx.bones[bone_config["parent"]].index
+            else:
+                pmx.bones[bone_name].parent_index = -1
+
+            # 表示先ボーンの設定
+            if bone_config["tail"] != -1:
+                pmx.bones[bone_name].tail_index = pmx.bones[bone_config["tail"]].index
+            else:
+                pmx.bones[bone_name].tail_index = -1
+
             if bone_name == "全ての親":
-                pmx.bones[bone_name] = Bone(bone_name, node_name, MVector3D(0, 0, 0), \
-                                            -1, 0, 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010, MVector3D(0, 3, 0))
+                pmx.bones[bone_name].position = MVector3D(0, 0, 0)
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D(0, 3, 0)
             elif bone_name == "センター":
-                pmx.bones[bone_name] = Bone(bone_name, node_name, MVector3D(0, (pmx.bones["左足"].position.y() + pmx.bones["左ひざ"].position.y()) / 2, 0), \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010, MVector3D(0, -pmx.bones["センター"].position.y(), 0))
+                pmx.bones[bone_name].position = MVector3D(0, (pmx.bones["左足"].position.y() + pmx.bones["左ひざ"].position.y()) / 2, 0)
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D(0, -pmx.bones["センター"].position.y(), 0)
             elif bone_name == "グルーブ":
-                pmx.bones[bone_name] = Bone(bone_name, node_name, MVector3D(0, pmx.bones["センター"].position.y() * 1.025, 0), \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010, MVector3D(0, pmx.bones["センター"].position.y() * 0.175, 0))
+                pmx.bones[bone_name].position = MVector3D(0, pmx.bones["センター"].position.y() * 1.025, 0)
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0004 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D(0, pmx.bones["センター"].position.y() * 0.175, 0)
             elif "肩P" in bone_name:
-                pmx.bones[bone_name] = Bone(bone_name, node_name, pmx.bones[bone_name[:-1]].position, \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0008 | 0x0010, MVector3D())
+                pmx.bones[bone_name].position = pmx.bones[bone_name[:-1]].position
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D()
             elif "肩C" in bone_name:
-                pmx.bones[bone_name] = Bone(bone_name, node_name, pmx.bones[bone_name[:-1]].position, \
-                                            pmx.bones[bone_config["parent"]].index, 0, 0x0000 | 0x0002 | 0x0100, MVector3D(), \
-                                            effect_index=pmx.bones[bone_name.replace("C", "P")].index, effect_factor=-1)
+                pmx.bones[bone_name].position = pmx.bones[bone_name[:-1]].position
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0100
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D()
+                pmx.bones[bone_name].effect_index = pmx.bones[bone_name.replace("C", "P")].index
+                pmx.bones[bone_name].effect_factor = -1
             elif "指先" in bone_name[-2:]:
                 if pmx.bones[bone_name].position == MVector3D():
                     # 指先の値が入ってない場合、とりあえず-1
@@ -724,34 +765,27 @@ class VrmReader(PmxReader):
                 pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
                 pmx.bones[bone_name].tail_index = -1
                 pmx.bones[bone_name].tail_position = MVector3D(0, 0, -1)
+            elif "手首" in bone_name[-2:]:
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
+                pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = (pmx.bones[f'{bone_name[0]}手首'].position - pmx.bones[f'{bone_name[0]}ひじ'].position).normalized()
             elif "腰キャンセル" in bone_name:
                 pmx.bones[bone_name].position = pmx.bones[f'{bone_name[-1]}足'].position.copy()
                 pmx.bones[bone_name].effect_index = pmx.bones['腰'].index
                 pmx.bones[bone_name].effect_factor = -1
             elif "D" == bone_name[-1]:
                 parent_name = bone_name[:-1]
-                pmx.bones[bone_name] = Bone(bone_name, node_name, pmx.bones[parent_name].position, pmx.bones[bone_config["parent"]].index, \
-                                            1, 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0100, MVector3D(), \
-                                            effect_index=pmx.bones[bone_name[:-1]].index, effect_factor=1)
-            elif "足先EX" == bone_name[1:]:
-                pmx.bones[bone_name].layer = 1
-            
-            # Boneオブジェクトを生成したら、上書きされてしまうので再設定
-            pmx.bones[bone_name].index = bone_idx
-
-            # 親ボーンの設定
-            if bone_config["parent"]:
+                pmx.bones[bone_name].position = pmx.bones[parent_name].position
                 pmx.bones[bone_name].parent_index = pmx.bones[bone_config["parent"]].index
-            elif pmx.bones[bone_name].parent_index in pmx.bones:
-                pmx.bones[bone_name].parent_index = pmx.bones[pmx.bones[bone_name].parent_index].index
-            else:
-                pmx.bones[bone_name].parent_index = -1
-            
-            # 表示先ボーンの設定
-            if bone_config["tail"] != -1:
-                pmx.bones[bone_name].tail_index = pmx.bones[bone_config["tail"]].index
-            else:
+                pmx.bones[bone_name].layer = 1
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010 | 0x0100
                 pmx.bones[bone_name].tail_index = -1
+                pmx.bones[bone_name].tail_position = MVector3D()
+                pmx.bones[bone_name].effect_index = pmx.bones[parent_name].index
+                pmx.bones[bone_name].effect_factor = 1
+            elif "足先EX" == bone_name[1:]:
+                pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
+                pmx.bones[bone_name].layer = 1
         
         # MMDで定義されていないボーン類
         for bone_name, bone in bones.items():
@@ -780,7 +814,7 @@ class VrmReader(PmxReader):
         human_nodes = [b for b in vrm.json_data["extensions"]["VRM"]["humanoid"]["humanBones"] if b["node"] == node_idx]
         # 人体ボーンの場合のみ人体データ取得
         human_node = None if len(human_nodes) == 0 else human_nodes[0]
-        bone_name = human_node["bone"] if human_node else node["name"]
+        bone_name = node["name"]
         jp_bone_name = BONE_PAIRS[bone_name]["name"] if bone_name in BONE_PAIRS else bone_name
 
         if node_idx in node_pairs:
