@@ -5,7 +5,8 @@ import sys
 import wx
 
 from form.panel.ExportPanel import ExportPanel
-from form.panel.BonePanel import BonePanel
+from form.panel.RigidbodyPanel import RigidbodyPanel
+from form.panel.PhysicsPanel import PhysicsPanel
 from module.MMath import MRect, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils import MFormUtils, MFileUtils # noqa
 from utils.MLogger import MLogger # noqa
@@ -72,8 +73,12 @@ class MainFrame(wx.Frame):
         self.export_panel_ctrl = ExportPanel(self, self.note_ctrl, 9)
         self.note_ctrl.AddPage(self.export_panel_ctrl, u"PMX変換", False)
 
+        # 剛体設定タブ
+        self.rigidbody_panel_ctrl = RigidbodyPanel(self, self.note_ctrl, 9)
+        self.note_ctrl.AddPage(self.rigidbody_panel_ctrl, u"準標準剛体", False)
+
         # 物理設定タブ
-        self.physics_panel_ctrl = BonePanel(self, self.note_ctrl, 9)
+        self.physics_panel_ctrl = PhysicsPanel(self, self.note_ctrl, 9)
         self.note_ctrl.AddPage(self.physics_panel_ctrl, u"物理", False)
 
         # ---------------------------------------------

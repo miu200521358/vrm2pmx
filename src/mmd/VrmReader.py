@@ -18,7 +18,7 @@ from mmd.PmxReader import PmxReader # noqa
 from module.MMath import MRect, MVector2D, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
 from utils.MException import SizingException, MKilledException # noqa
-from form.panel.BonePanel import BONE_PAIRS, MORPH_PAIRS, RIGIDBODY_PAIRS # noqa
+from form.panel.BonePanel import MORPH_PAIRS # noqa
 
 logger = MLogger(__name__, level=1)
 
@@ -37,8 +37,10 @@ MIKU_METER = 12.5
 
 
 class VrmReader(PmxReader):
-    def __init__(self, file_path, is_check=True):
+    def __init__(self, file_path: str, is_check=True):
         self.file_path = file_path
+        self.bone_pairs = {}
+        self.physics_pairs = {}
         self.is_check = is_check
         self.offset = 0
         self.buffer = None
@@ -475,7 +477,7 @@ class VrmReader(PmxReader):
                             bone.name = f"{parent_bone.name[:4]}_{(parent_suffix + 1):02d}"
 
                 # MMDモデル定義ベースの剛体
-                for node_name, bone_config in BONE_PAIRS.items():
+                for node_name, bone_config in self.bone_pairs.items():
                     bone_name = bone_config["name"]
                     
                     if bone_config["rigidBody"] is not None:
@@ -488,16 +490,16 @@ class VrmReader(PmxReader):
                 
                 for bone_name, bone in pmx.bones.items():
                     if bone.name not in pmx.rigidbodies and "捩" not in bone.name and not bone.getExternalRotationFlag() and bone.index in bone_vertices:
-                        bone_config = [b for b in BONE_PAIRS.values() if bone.name == b["name"]]
+                        bone_config = [b for b in self.bone_pairs.values() if bone.name == b["name"]]
                         # MMDモデル定義外の剛体
                         if len(bone_config) == 0:
-                            rigidbodies = [rv for rk, rv in RIGIDBODY_PAIRS.items() if rk in bone.name]
-                            target_rigidbody = rigidbodies[0] if len(rigidbodies) > 0 else RIGIDBODY_PAIRS["Others"]
+                            rigidbodies = [rv for rk, rv in self.physics_pairs.items() if rk in bone.name]
+                            target_rigidbody = rigidbodies[0] if len(rigidbodies) > 0 else self.physics_pairs["Others"]
                             parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0] if bone.parent_index >= 0 else None
                             rigidbody_param_from = target_rigidbody["rigidbodyParamFrom"]
                             rigidbody_param_to = target_rigidbody["rigidbodyParamTo"]
                             parent_cnt = 0
-                            if not parent_bone or parent_bone.name in BONE_PAIRS or parent_bone.name not in pmx.rigidbodies or \
+                            if not parent_bone or parent_bone.name in self.bone_pairs or parent_bone.name not in pmx.rigidbodies or \
                                (parent_bone.name in pmx.rigidbodies and pmx.rigidbodies[parent_bone.name].mode == 0 and \
                                     (not bone.name[-1].isdigit() or (bone.name[-1].isdigit() and int(bone.name[-1]) in [0, 1]))):
                                 # MMDモデル定義ボーンに繋がってる場合・親ボーンに剛体がない場合・親剛体がボーン追従剛体の場合、そのまま接続
@@ -582,9 +584,9 @@ class VrmReader(PmxReader):
                     if "全ての親" == jp_bone_name:
                         continue
 
-                    if bone.english_name in BONE_PAIRS or bone.name in BONE_PAIRS:
+                    if bone.english_name in self.bone_pairs or bone.name in self.bone_pairs:
                         # MMDボーン定義内の場合
-                        bone_config = BONE_PAIRS[bone.english_name]
+                        bone_config = self.bone_pairs[bone.english_name]
 
                         if not bone_config["display"]:
                             continue
@@ -684,12 +686,12 @@ class VrmReader(PmxReader):
         joint_euler = rot.toEulerAngles()
         joint_rotation = MVector3D(math.radians(joint_euler.x()), math.radians(joint_euler.y()), math.radians(joint_euler.z()))
 
-        translation_limit_min = MVector3D(RIGIDBODY_PAIRS["横"]["JointTLMin"])
-        translation_limit_max = MVector3D(RIGIDBODY_PAIRS["横"]["JointTLMax"])
-        rotation_limit_min = MVector3D(math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][0]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][1]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][2]))
-        rotation_limit_max = MVector3D(math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][0]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][1]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][2]))
-        spring_constant_translation = MVector3D(RIGIDBODY_PAIRS["横"]["JointSCT"])
-        spring_constant_rotation = MVector3D(RIGIDBODY_PAIRS["横"]["JointSCR"][0], RIGIDBODY_PAIRS["横"]["JointSCR"][1], RIGIDBODY_PAIRS["横"]["JointSCR"][2])
+        translation_limit_min = MVector3D(self.physics_pairs["横"]["JointTLMin"])
+        translation_limit_max = MVector3D(self.physics_pairs["横"]["JointTLMax"])
+        rotation_limit_min = MVector3D(math.radians(self.physics_pairs["横"]["JointRLMin"][0]), math.radians(self.physics_pairs["横"]["JointRLMin"][1]), math.radians(self.physics_pairs["横"]["JointRLMin"][2]))
+        rotation_limit_max = MVector3D(math.radians(self.physics_pairs["横"]["JointRLMax"][0]), math.radians(self.physics_pairs["横"]["JointRLMax"][1]), math.radians(self.physics_pairs["横"]["JointRLMax"][2]))
+        spring_constant_translation = MVector3D(self.physics_pairs["横"]["JointSCT"])
+        spring_constant_rotation = MVector3D(self.physics_pairs["横"]["JointSCR"][0], self.physics_pairs["横"]["JointSCR"][1], self.physics_pairs["横"]["JointSCR"][2])
 
         joint = Joint(f'横_{next_skirt_bone.name}', f'横_{next_skirt_bone.name}', 0, root_skirt_rigidbody.index, next_skirt_rigidbody.index, root_skirt_bone.position, joint_rotation, \
                       translation_limit_min, translation_limit_max, rotation_limit_min, rotation_limit_max, spring_constant_translation, spring_constant_rotation)
@@ -1039,7 +1041,7 @@ class VrmReader(PmxReader):
     def custom_bones(self, pmx: PmxModel, bones: dict):
         # MMDで定義されているボーン
         bone_idx = 0
-        for node_name, bone_config in BONE_PAIRS.items():
+        for node_name, bone_config in self.bone_pairs.items():
             bone_name = bone_config["name"]
 
             if bone_name in bones:
@@ -1050,7 +1052,7 @@ class VrmReader(PmxReader):
             pmx.bones[bone_name].index = bone_idx
             bone_idx += 1
 
-        for node_name, bone_config in BONE_PAIRS.items():
+        for node_name, bone_config in self.bone_pairs.items():
             bone_name = bone_config["name"]
 
             pmx.bones[bone_name].name = bone_name
@@ -1173,7 +1175,7 @@ class VrmReader(PmxReader):
         # 人体ボーンの場合のみ人体データ取得
         human_node = None if len(human_nodes) == 0 else human_nodes[0]
         bone_name = node["name"]
-        jp_bone_name = BONE_PAIRS[bone_name]["name"] if bone_name in BONE_PAIRS else bone_name
+        jp_bone_name = self.bone_pairs[bone_name]["name"] if bone_name in self.bone_pairs else bone_name
 
         if node_idx in node_pairs:
             return jp_bone_name
@@ -1192,7 +1194,7 @@ class VrmReader(PmxReader):
         #  0x0004  : 移動可能
         #  0x0008  : 表示
         #  0x0010  : 操作可
-        if bone_name in BONE_PAIRS:
+        if bone_name in self.bone_pairs:
             if jp_bone_name[-1] == "先":
                 flag = 0x0001 | 0x0002
             elif jp_bone_name in ["全ての親", "センター", "グルーブ"]:

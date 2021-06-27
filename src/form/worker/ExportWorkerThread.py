@@ -44,7 +44,8 @@ class ExportWorkerThread(BaseWorkerThread):
                     logging_level=self.frame.logging_level, \
                     vrm_model=self.frame.export_panel_ctrl.vrm_model_file_ctrl.data, \
                     output_path=self.frame.export_panel_ctrl.output_pmx_file_ctrl.file_ctrl.GetPath(), \
-                    bone_pairs=BONE_PAIRS, \
+                    bone_pairs=self.frame.rigidbody_panel_ctrl.get_bone_pairs(), \
+                    physics_pairs=self.frame.physics_panel_ctrl.get_physics_pairs(), \
                     monitor=self.frame.export_panel_ctrl.console_ctrl, \
                     is_file=False, \
                     outout_datetime=logger.outout_datetime, \
