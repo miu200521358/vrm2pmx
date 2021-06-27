@@ -36,7 +36,7 @@ class MainFrame(wx.Frame):
         self.worker = None
         self.load_worker = None
 
-        wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=u"Vrm2Pmxエクスポーター ローカル版 {0}".format(self.version_name), \
+        wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=u"Vrm2Pmxコンバーター ローカル版 {0}".format(self.version_name), \
                           pos=wx.DefaultPosition, size=wx.Size(600, 650), style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL)
 
         # ファイル履歴読み込み

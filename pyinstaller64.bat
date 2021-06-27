@@ -8,4 +8,4 @@ cd /d %~dp0
 
 cls
 
-activate vmdsizing_cython && src\setup_install.bat && pyinstaller --clean motion_supporter64.spec
+activate vmdsizing_cython && pyinstaller --clean vrm2pmx.spec

@@ -572,15 +572,16 @@ class VrmReader(PmxReader):
                                 self.create_joint(pmx, bone, translation_limit_min, translation_limit_max, rotation_limit_min, \
                                                   rotation_limit_max, spring_constant_translation, spring_constant_rotation)
 
+                            logger.info(f'-- 剛体・ジョイントデータ解析[{bone.name}]')
+
                 logger.info('-- 剛体・ジョイントデータ解析')
 
-                # FIXME
-                # # スカートとかの横ジョイント
-                # # スカートの根元剛体リストを取得
-                # skirt_root_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if "Skirt" in rv.name and rv.mode == 2}
-                # if len(skirt_root_rigidbodies) > 0:
-                #     skirt_root_bones = {bv.index: bv for bv in pmx.bones.values() if bv.name in skirt_root_rigidbodies.keys()}
-                #     self.create_all_horizonal_joint(pmx, skirt_root_bones, skirt_root_rigidbodies)
+                # スカートとかの横ジョイント
+                # スカートの根元剛体リストを取得
+                skirt_root_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if "Skirt" in rv.name and rv.mode == 2}
+                if len(skirt_root_rigidbodies) > 0:
+                    skirt_root_bones = {bv.index: bv for bv in pmx.bones.values() if bv.name in skirt_root_rigidbodies.keys()}
+                    self.create_all_horizonal_joint(pmx, skirt_root_bones, skirt_root_rigidbodies)
 
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
@@ -680,14 +681,9 @@ class VrmReader(PmxReader):
             return
         # 次の剛体
         next_skirt_rigidbody = pmx.rigidbodies[next_skirt_bone.name]
-        
-        # 軸の方向
-        axis_vec = next_skirt_bone.position - root_skirt_bone.position
-        tail_vec = axis_vec.normalized().data()
-        # 回転量
-        rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
-        joint_euler = rot.toEulerAngles()
-        joint_rotation = MVector3D(math.radians(joint_euler.x()), math.radians(joint_euler.y()), math.radians(joint_euler.z()))
+
+        # 回転量は接続元剛体の向きに合わせる
+        joint_rotation = root_skirt_rigidbody.shape_rotation.copy()
 
         translation_limit_min = MVector3D(self.physics_pairs["横"]["JointTLMin"])
         translation_limit_max = MVector3D(self.physics_pairs["横"]["JointTLMax"])
@@ -720,18 +716,8 @@ class VrmReader(PmxReader):
         if not parent_rigidbody:
             return
 
-        if bone.tail_index > 0:
-            tail_bone = [b for b in pmx.bones.values() if bone.tail_index == b.index][0]
-            tail_position = tail_bone.position
-        else:
-            tail_position = bone.tail_position + bone.position
-        # 軸の方向
-        axis_vec = tail_position - bone.position
-        tail_vec = axis_vec.normalized().data()
-        # 回転量
-        rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
-        joint_euler = rot.toEulerAngles()
-        joint_rotation = MVector3D(math.radians(joint_euler.x()), math.radians(joint_euler.y()), math.radians(joint_euler.z()))
+        # 回転量は接続先剛体の向きに合わせる
+        joint_rotation = rigidbody.shape_rotation.copy()
 
         joint = Joint(bone.name, bone.english_name, 0, parent_rigidbody.index, rigidbody.index, bone.position, joint_rotation, \
                       translation_limit_min, translation_limit_max, rotation_limit_min, rotation_limit_max, spring_constant_translation, spring_constant_rotation)
@@ -777,7 +763,7 @@ class VrmReader(PmxReader):
             tail_position = bone.tail_position + bone.position
 
         # サイズ
-        if len(strong_vertex_list) > 0 and ((bone and bone.tail_index == -1) or (rigidbody_type == 1 and tail_bone and tail_bone.tail_index == -1)):
+        if len(strong_vertex_list) > 0 and ((bone and bone.tail_index == -1) or (rigidbody_type == 1 and tail_bone and tail_bone.tail_index == -1) or "髪" in bone.name):
             diff_size = np.abs(strong_max_vertex - strong_min_vertex)
         else:
             diff_size = np.abs(max_vertex - min_vertex)
@@ -787,14 +773,14 @@ class VrmReader(PmxReader):
             # 球体
             if "頭" == bone.name:
                 # 頭はエルフ耳がある場合があるので、両目の間隔を使う
-                eye_length = pmx.bones["右目"].position.distanceToPoint(pmx.bones["左目"].position)
+                eye_length = pmx.bones["右目"].position.distanceToPoint(pmx.bones["左目"].position) * 2
                 center_vertex[0] = bone.position.x()
                 center_vertex[1] = min_vertex[1] + (max_vertex[1] - min_vertex[1]) / 2
                 center_vertex[2] = bone.position.z()
                 shape_size = MVector3D(eye_length, eye_length, eye_length) * rigidbody_factor
             else:
                 # それ以外（胸とか）はそのまま
-                max_size = np.max(diff_size) * rigidbody_factor
+                max_size = np.max(diff_size / 2) * rigidbody_factor
                 shape_size = MVector3D(max_size, max_size, max_size)
         else:
             # カプセルと箱
