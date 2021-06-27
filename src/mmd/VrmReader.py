@@ -9,8 +9,7 @@ import shutil
 import numpy as np
 import re
 import math
-
-from numpy.core.defchararray import isdigit
+import urllib.parse
 
 from mmd.VrmData import VrmModel # noqa
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink # noqa
@@ -493,30 +492,91 @@ class VrmReader(PmxReader):
                         # MMDモデル定義外の剛体
                         if len(bone_config) == 0:
                             rigidbodies = [rv for rk, rv in RIGIDBODY_PAIRS.items() if rk in bone.name]
-                            rigidbody_mode = 2
+                            target_rigidbody = rigidbodies[0] if len(rigidbodies) > 0 else RIGIDBODY_PAIRS["Others"]
                             parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0] if bone.parent_index >= 0 else None
-                            rigidbody_param = rigidbodies[0]["rigidbodyParam"] if len(rigidbodies) > 0 else []
+                            rigidbody_param_from = target_rigidbody["rigidbodyParamFrom"]
+                            rigidbody_param_to = target_rigidbody["rigidbodyParamTo"]
+                            parent_cnt = 0
                             if not parent_bone or parent_bone.name in BONE_PAIRS or parent_bone.name not in pmx.rigidbodies or \
                                (parent_bone.name in pmx.rigidbodies and pmx.rigidbodies[parent_bone.name].mode == 0 and \
                                     (not bone.name[-1].isdigit() or (bone.name[-1].isdigit() and int(bone.name[-1]) in [0, 1]))):
-                                # MMDモデル定義ボーンに繋がってる場合・親ボーンに剛体がない場合・親剛体がボーン追従剛体の場合、ボーン追従剛体
-                                rigidbody_mode = 0
+                                # MMDモデル定義ボーンに繋がってる場合・親ボーンに剛体がない場合・親剛体がボーン追従剛体の場合、そのまま接続
+                                rigidbody_mode = 2
+                                # 親ボーンは自身
                             else:
-                                # 物理合わせの場合、親より少し小さくする
-                                parent_param = pmx.rigidbodies[parent_bone.name].param
-                                rigidbody_param = (np.array([parent_param.mass, parent_param.linear_damping, parent_param.angular_damping, \
-                                                             parent_param.restitution, parent_param.friction]) * np.array([0.8, 0.8, 0.8, 10, 2])).tolist()
-                            rigid_factor = rigidbodies[0]["rigidbodyFactor"] if len(rigidbodies) > 0 else 0.5
-                            rigidbody_collision = rigidbodies[0]["rigidbodyCollisions"] if len(rigidbodies) > 0 else 9
+                                # 子は物理合わせ
+                                rigidbody_mode = 1
+                                parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0]
+                                target_bone = bone.copy()
+
+                                # 根元を探す
+                                while target_bone.parent_index > -1:
+                                    parent_cnt += 1
+                                    parent_bone = [b for b in pmx.bones.values() if b.index == target_bone.parent_index][0]
+                                    if parent_bone.name not in pmx.rigidbodies:
+                                        break
+                                    # 親が見つからない場合、上に移動
+                                    target_bone = parent_bone
+                            
+                            # 末端を探す
+                            child_cnt = 0
+                            if bone.tail_index >= 0:
+                                child_bones = [b for b in pmx.bones.values() if b.index == bone.tail_index][0]
+                                target_bone = bone.copy()
+                                while target_bone.tail_index > -1:
+                                    child_cnt += 1
+                                    child_bones = [b for b in pmx.bones.values() if b.index == target_bone.tail_index]
+                                    if len(child_bones) > 0:
+                                        target_bone = child_bones[0]
+                                    else:
+                                        break
+
+                            # 質量：末端からの二乗
+                            # 減衰：根元から末端の線形補間
+                            # 反発・摩擦：根元一定
+                            rigidbody_param = [rigidbody_param_to[0] * (child_cnt ** 2),
+                                               (rigidbody_param_from[1] + ((rigidbody_param_to[1] - rigidbody_param_from[1]) * (parent_cnt / (parent_cnt + child_cnt)))),
+                                               (rigidbody_param_from[1] + ((rigidbody_param_to[1] - rigidbody_param_from[1]) * (parent_cnt / (parent_cnt + child_cnt)))),
+                                               rigidbody_param_from[3], rigidbody_param_from[4]]
+
+                            rigidbody_type = target_rigidbody["rigidBody"]
+                            rigid_factor = target_rigidbody["rigidbodyFactor"]
+                            rigidbody_collision = target_rigidbody["rigidbodyCollisions"]
                             rigidbody_no_collisions = 0
-                            rigidbody_no_collisions_list = rigidbodies[0]["rigidbodyNoCollisions"] if len(rigidbodies) > 0 else []
+                            rigidbody_no_collisions_list = target_rigidbody["rigidbodyNoCollisions"]
                             for nc in range(16):
                                 if nc not in rigidbody_no_collisions_list:
                                     rigidbody_no_collisions |= 1 << nc
-                            self.create_rigidbody(pmx, bone_name, bone_vertices, 2, rigidbody_mode, rigid_factor, rigidbody_collision, rigidbody_no_collisions, rigidbody_param)
+                            self.create_rigidbody(pmx, bone_name, bone_vertices, rigidbody_type, rigidbody_mode, rigid_factor, rigidbody_collision, rigidbody_no_collisions, rigidbody_param)
 
-                logger.info('-- 剛体データ解析')
-                
+                            if rigidbody_mode in [1, 2]:
+                                # ＋物理の場合、親とのジョイント生成
+                                if len(rigidbodies) > 0:
+                                    translation_limit_min = MVector3D(target_rigidbody["JointTLMin"])
+                                    translation_limit_max = MVector3D(target_rigidbody["JointTLMax"])
+                                    rotation_limit_min = MVector3D(math.radians(target_rigidbody["JointRLMin"][0]), math.radians(target_rigidbody["JointRLMin"][1]), math.radians(target_rigidbody["JointRLMin"][2]))
+                                    rotation_limit_max = MVector3D(math.radians(target_rigidbody["JointRLMax"][0]), math.radians(target_rigidbody["JointRLMax"][1]), math.radians(target_rigidbody["JointRLMax"][2]))
+                                    spring_constant_translation = MVector3D(target_rigidbody["JointSCT"])
+                                    spring_constant_rotation = MVector3D(target_rigidbody["JointSCR"][0], target_rigidbody["JointSCR"][1], target_rigidbody["JointSCR"][2])
+                                else:
+                                    translation_limit_min = MVector3D()
+                                    translation_limit_max = MVector3D()
+                                    rotation_limit_min = MVector3D(math.radians(-10), math.radians(-1), math.radians(-5))
+                                    rotation_limit_max = MVector3D(math.radians(10), math.radians(1), math.radians(20))
+                                    spring_constant_translation = MVector3D()
+                                    spring_constant_rotation = MVector3D(7, 7, 7)
+                                self.create_joint(pmx, bone, translation_limit_min, translation_limit_max, rotation_limit_min, \
+                                                  rotation_limit_max, spring_constant_translation, spring_constant_rotation)
+
+                logger.info('-- 剛体・ジョイントデータ解析')
+
+                # スカートの横ジョイント
+                # スカートの根元剛体リストを取得
+                skirt_root_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if "Skirt" in rv.name and rv.mode == 2}
+                if len(skirt_root_rigidbodies) > 0:
+                    skirt_root_bones = {bv.index: bv for bv in pmx.bones.values() if bv.name in skirt_root_rigidbodies.keys()}
+                    self.create_all_horizonal_joint(pmx, skirt_root_bones, skirt_root_rigidbodies)
+
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
                     if "全ての親" == jp_bone_name:
@@ -545,6 +605,19 @@ class VrmReader(PmxReader):
                 
                 # モデル名
                 pmx.name = vrm.json_data['extensions']['VRM']['meta']['title']
+                if not pmx.name:
+                    pmx.name = os.path.basename(vrm.path).split('.')[0]
+
+                licence_comment = ""
+                if vrm.json_data['extensions']['VRM']['meta']['licenseName'] == "Other":
+                    licence_dict = urllib.parse.parse_qs(urllib.parse.urlparse(vrm.json_data['extensions']['VRM']['meta']['otherPermissionUrl']).query)
+                    for k, v in licence_dict.items():
+                        licence_comment += f'　　{k}: {",".join(v)}\r\n'
+
+                pmx.comment = f"モデル名: {vrm.json_data['extensions']['VRM']['meta']['title']}\r\n" \
+                    + f"作者: {vrm.json_data['extensions']['VRM']['meta']['author']}\r\n" \
+                    + f"ライセンス: {vrm.json_data['extensions']['VRM']['meta']['licenseName']}\r\n{licence_comment}\r\n" \
+                    + "変換: Vrm2PmxConverter (@miu200521358)"
 
             return True
         except MKilledException as ke:
@@ -558,15 +631,123 @@ class VrmReader(PmxReader):
             logger.error("VRM2PMX処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
             raise e
     
+    def create_all_horizonal_joint(self, pmx: PmxModel, skirt_bones: dict, skirt_rigidbodies: dict):
+        if list(skirt_rigidbodies.values())[0].mode == 1:
+            # 物理の場合だけ、横ジョイント
+            skirt_bone_poses = [b.position.data().tolist() for b in skirt_bones.values()]
+            # 最も右端(向かって左）、かつ手前（Zが小さい）のボーンを基点とする
+            root_bone_idx = [i for i, v in enumerate(skirt_bone_poses) if sorted(skirt_bone_poses, key=lambda x: (x[0], x[2]))[0] == v][0]
+            # 横に繋いでいく
+            self.create_horizonal_joint(pmx, skirt_bones, skirt_bone_poses, root_bone_idx, [])
+
+        skirt_bones = {b.index: b for b in pmx.bones.values() if b.name in skirt_rigidbodies.keys()}
+        child_skirt_bones = {b.name: b for b in pmx.bones.values() if b.parent_index in skirt_bones.keys()}
+
+        if len(child_skirt_bones) > 0:
+            # 子どもがいる場合、子どもを繋ぐ
+            child_skirt_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if rk in child_skirt_bones.keys()}
+            if len(child_skirt_rigidbodies) > 0:
+                return self.create_all_horizonal_joint(pmx, child_skirt_bones, child_skirt_rigidbodies)
+            else:
+                return
+        else:
+            return
+    
+    def create_horizonal_joint(self, pmx: PmxModel, skirt_bones: dict, skirt_bone_poses: list, root_bone_idx: int, registerd_idxs: list):
+        # 基点ボーンから各ボーンの距離
+        bone_distances = np.sum(np.abs(np.array(skirt_bone_poses) - np.array(skirt_bone_poses[root_bone_idx]))**2, axis=-1)**(1. / 2)
+        # 0番目は必ず自分自身
+        root_skirt_bone = list(skirt_bones.values())[np.argsort(bone_distances)[0]]
+        # 次に近いのが距離
+        for n in range(1, len(skirt_bone_poses) + 1):
+            if n >= len(skirt_bone_poses) or np.argsort(bone_distances)[n] not in registerd_idxs:
+                # 最後までいったか、まだ登録されてないINDEXの場合抜ける
+                break
+        if n >= len(skirt_bone_poses):
+            # 全部終わったら終了
+            return
+        next_skirt_bone = list(skirt_bones.values())[np.argsort(bone_distances)[n]]
+        if f'横_{next_skirt_bone.name}' in pmx.rigidbodies.keys():
+            return
+        # ROOTの剛体
+        root_skirt_rigidbody = pmx.rigidbodies[root_skirt_bone.name]
+        if next_skirt_bone.name not in pmx.rigidbodies:
+            return
+        # 次の剛体
+        next_skirt_rigidbody = pmx.rigidbodies[next_skirt_bone.name]
+        
+        # 軸の方向
+        axis_vec = next_skirt_bone.position - root_skirt_bone.position
+        tail_vec = axis_vec.normalized().data()
+        # 回転量
+        rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
+        joint_euler = rot.toEulerAngles()
+        joint_rotation = MVector3D(math.radians(joint_euler.x()), math.radians(joint_euler.y()), math.radians(joint_euler.z()))
+
+        translation_limit_min = MVector3D(RIGIDBODY_PAIRS["横"]["JointTLMin"])
+        translation_limit_max = MVector3D(RIGIDBODY_PAIRS["横"]["JointTLMax"])
+        rotation_limit_min = MVector3D(math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][0]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][1]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMin"][2]))
+        rotation_limit_max = MVector3D(math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][0]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][1]), math.radians(RIGIDBODY_PAIRS["横"]["JointRLMax"][2]))
+        spring_constant_translation = MVector3D(RIGIDBODY_PAIRS["横"]["JointSCT"])
+        spring_constant_rotation = MVector3D(RIGIDBODY_PAIRS["横"]["JointSCR"][0], RIGIDBODY_PAIRS["横"]["JointSCR"][1], RIGIDBODY_PAIRS["横"]["JointSCR"][2])
+
+        joint = Joint(f'横_{next_skirt_bone.name}', f'横_{next_skirt_bone.name}', 0, root_skirt_rigidbody.index, next_skirt_rigidbody.index, root_skirt_bone.position, joint_rotation, \
+                      translation_limit_min, translation_limit_max, rotation_limit_min, rotation_limit_max, spring_constant_translation, spring_constant_rotation)
+        pmx.joints[joint.name] = joint
+        registerd_idxs.append(np.argsort(bone_distances)[n])
+
+        return self.create_horizonal_joint(pmx, skirt_bones, skirt_bone_poses, np.argsort(bone_distances)[n], registerd_idxs)
+
+    def create_joint(self, pmx: PmxModel, bone: Bone, translation_limit_min: MVector3D, translation_limit_max: MVector3D, \
+                     rotation_limit_min: MVector3D, rotation_limit_max: MVector3D, spring_constant_translation: MVector3D, spring_constant_rotation: MVector3D):
+        rigidbody = pmx.rigidbodies[bone.name]
+        parent_rigidbody = None
+        parent_bone = [b for b in pmx.bones.values() if b.index == bone.parent_index][0]
+        target_bone = bone.copy()
+        while target_bone.parent_index > -1:
+            parent_bone = [b for b in pmx.bones.values() if b.index == target_bone.parent_index][0]
+            if parent_bone.name in pmx.rigidbodies:
+                parent_rigidbody = pmx.rigidbodies[parent_bone.name]
+                break
+            # 親が見つからない場合、上に移動
+            target_bone = parent_bone
+        
+        if not parent_rigidbody:
+            return
+
+        if bone.tail_index > 0:
+            tail_bone = [b for b in pmx.bones.values() if bone.tail_index == b.index][0]
+            tail_position = tail_bone.position
+        else:
+            tail_position = bone.tail_position + bone.position
+        # 軸の方向
+        axis_vec = tail_position - bone.position
+        tail_vec = axis_vec.normalized().data()
+        # 回転量
+        rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
+        joint_euler = rot.toEulerAngles()
+        joint_rotation = MVector3D(math.radians(joint_euler.x()), math.radians(joint_euler.y()), math.radians(joint_euler.z()))
+
+        joint = Joint(bone.name, bone.english_name, 0, parent_rigidbody.index, rigidbody.index, bone.position, joint_rotation, \
+                      translation_limit_min, translation_limit_max, rotation_limit_min, rotation_limit_max, spring_constant_translation, spring_constant_rotation)
+        pmx.joints[joint.name] = joint
+    
     def create_rigidbody(self, pmx: PmxModel, bone_name: str, bone_vertices: dict, rigidbody_type: int, rigidbody_mode: int, rigidbody_factor: float, \
                          collision_group: int, no_collision_group: int, rigidbody_param: list):
         # 剛体が必要な場合
         bone = pmx.bones[bone_name]
+        if bone.index not in bone_vertices:
+            return
+
         # ボーンに紐付く頂点リストを取得
         vertex_list = []
+        normal_list = []
         for vertex in bone_vertices[bone.index]:
             vertex_list.append(vertex.position.data().tolist())
+            normal_list.append(vertex.normal.data().tolist())
         vertex_ary = np.array(vertex_list)
+        # 法線の平均値
+        mean_normal = np.mean(np.array(vertex_list), axis=0)
         # 最小
         min_vertex = np.min(vertex_ary, axis=0)
         # 最大
@@ -584,6 +765,7 @@ class VrmReader(PmxReader):
                 eye_length = pmx.bones["右目"].position.distanceToPoint(pmx.bones["左目"].position)
                 center_vertex[0] = bone.position.x()
                 center_vertex[1] = min_vertex[1] + (max_vertex[1] - min_vertex[1]) / 2
+                center_vertex[2] = bone.position.z()
                 shape_size = MVector3D(eye_length * rigidbody_factor, eye_length, eye_length)
             else:
                 # それ以外（胸とか）はそのまま
@@ -597,33 +779,39 @@ class VrmReader(PmxReader):
                 tail_position = tail_bone.position
             else:
                 tail_position = bone.tail_position + bone.position
-            # 軸の方向
-            diff_length = (tail_position - bone.position).abs()
             axis_vec = tail_position - bone.position
             tail_vec = axis_vec.normalized().data()
             diff_vec = MVector3D(diff_size).normalized().data()
+            
             # 回転量
-            rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
+            if rigidbody_type == 1:
+                # 箱
+                rot = MQuaternion.rotationTo(MVector3D(1, 0, 0), MVector3D.crossProduct(MVector3D(mean_normal), MVector3D(tail_vec)))
+            else:
+                # カプセル
+                rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
             tail_vec_idx = np.argmax(np.abs(diff_vec))
             shape_euler = rot.toEulerAngles()
             shape_rotation = MVector3D(math.radians(shape_euler.x()), math.radians(shape_euler.y()), math.radians(shape_euler.z()))
-            if tail_vec_idx == 0:
-                # X軸方向に伸びてる場合 / 半径：Y, 高さ：X
-                shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length.x(), diff_size[2])
-            elif tail_vec_idx == 1:
-                # Y軸方向に伸びてる場合 / 半径：X, 高さ：Y
-                shape_size = MVector3D(diff_size[0] * rigidbody_factor, diff_length.y(), diff_size[2])
+
+            # 軸の長さ
+            if rigidbody_type == 1:
+                shape_size = MVector3D(diff_size[0] * 0.7, diff_size[1] * 0.8, diff_size[2] * 0.2)
             else:
-                # Z軸方向に伸びてる場合 / 半径：Y, 高さ：Z
-                shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length.z(), diff_size[0])
-            shape_size.setY(max(0.2, shape_size.y() - shape_size.x()))
-            if "足首" not in bone.name:
-                center_vertex = bone.position + (tail_position - bone.position) / 2
+                diff_length = tail_position.distanceToPoint(bone.position)
+                if tail_vec_idx == 0:
+                    # X軸方向に伸びてる場合 / 半径：Y, 高さ：X
+                    shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length, diff_size[2])
+                else:
+                    # Y軸方向に伸びてる場合 / 半径：X, 高さ：Y
+                    shape_size = MVector3D(diff_size[0] * rigidbody_factor, diff_length, diff_size[2])
+            center_vertex = bone.position + (tail_position - bone.position) / 2
 
         logger.debug("bone: %s, min: %s, max: %s, center: %s", bone.name, min_vertex, max_vertex, center_vertex)
         rigidbody = RigidBody(bone.name, bone.english_name, bone.index, collision_group, no_collision_group, \
                               rigidbody_type, shape_size, MVector3D(center_vertex), shape_rotation, \
                               rigidbody_param[0], rigidbody_param[1], rigidbody_param[2], rigidbody_param[3], rigidbody_param[4], rigidbody_mode)
+        rigidbody.index = len(pmx.rigidbodies)
         pmx.rigidbodies[rigidbody.name] = rigidbody
     
     def create_bone_arm_twist(self, pmx: PmxModel, direction: str):
@@ -962,13 +1150,20 @@ class VrmReader(PmxReader):
                 bone.index = len(pmx.bones)
                 # 親ボーンはボーンINDEXに定義されてるボーン名からINDEXを再定義
                 if bone.parent_index in pmx.bones:
-                    bone.parent_index = pmx.bones[bone.parent_index].index
+                    if bone.parent_index == "腰":
+                        bone.parent_index = pmx.bones["下半身"].index
+                    else:
+                        bone.parent_index = pmx.bones[bone.parent_index].index
                 else:
                     bone.parent_index = -1
                 # 子ボーンが定義可能な場合は＋1
                 if bone.tail_index != -1:
                     bone.tail_index = bone.index + 1
-                
+
+                if bone.tail_index == -1 and bone.tail_position == MVector3D():
+                    # 末端は操作不可
+                    bone.flag = 0x0001 | 0x0002
+
                 pmx.bones[bone_name] = bone
 
     def define_bone(self, vrm: VrmModel, bones: dict, node_idx: int, parent_name: str, node_pairs: dict):

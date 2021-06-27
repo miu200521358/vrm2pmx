@@ -72,9 +72,9 @@ class MainFrame(wx.Frame):
         self.export_panel_ctrl = ExportPanel(self, self.note_ctrl, 9)
         self.note_ctrl.AddPage(self.export_panel_ctrl, u"PMX変換", False)
 
-        # # ボーン設定タブ
-        # self.bone_panel_ctrl = BonePanel(self, self.note_ctrl, 9)
-        # self.note_ctrl.AddPage(self.bone_panel_ctrl, u"ボーン", False)
+        # 物理設定タブ
+        self.physics_panel_ctrl = BonePanel(self, self.note_ctrl, 9)
+        self.note_ctrl.AddPage(self.physics_panel_ctrl, u"物理", False)
 
         # ---------------------------------------------
 

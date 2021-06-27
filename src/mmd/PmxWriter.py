@@ -368,6 +368,49 @@ class PmxWriter:
             # ジョイントの数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.joints.values()))))
 
+            for jidx, joint in enumerate(pmx.joints.values()):
+                # ジョイント名
+                self.write_text(fout, joint.name, f"Joint {jidx}")
+                self.write_text(fout, joint.english_name, f"Joint {jidx}")
+                # 1  : byte	| Joint種類 - 0:スプリング6DOF   | PMX2.0では 0 のみ(拡張用)
+                fout.write(struct.pack(TYPE_BYTE, joint.joint_type))
+                # n  : 剛体Indexサイズ  | 関連剛体AのIndex - 関連なしの場合は-1
+                fout.write(struct.pack(rigidbody_idx_type, joint.rigidbody_index_a))
+                # n  : 剛体Indexサイズ  | 関連剛体BのIndex - 関連なしの場合は-1
+                fout.write(struct.pack(rigidbody_idx_type, joint.rigidbody_index_b))
+                # 12 : float3	| 位置(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.position.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.position.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.position.z())))
+                # 12 : float3	| 回転(x,y,z) -> ラジアン角
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation.z())))
+                # 12 : float3	| 移動制限-下限(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_min.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_min.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_min.z())))
+                # 12 : float3	| 移動制限-上限(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_max.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_max.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.translation_limit_max.z())))
+                # 12 : float3	| 回転制限-下限(x,y,z) -> ラジアン角
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_min.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_min.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_min.z())))
+                # 12 : float3	| 回転制限-上限(x,y,z) -> ラジアン角
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_max.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_max.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.rotation_limit_max.z())))
+                # 12 : float3	| バネ定数-移動(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_translation.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_translation.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_translation.z())))
+                # 12 : float3	| バネ定数-回転(x,y,z)
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_rotation.x())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_rotation.y())))
+                fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_rotation.z())))
+
             logger.info(f"-- ジョイントデータ出力終了({len(list(pmx.joints.values()))})")
 
     def define_index_size(self, size: int):
