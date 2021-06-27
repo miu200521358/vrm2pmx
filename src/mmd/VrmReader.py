@@ -11,6 +11,8 @@ import re
 import math
 import urllib.parse
 
+from wx.core import NO, Position
+
 from mmd.VrmData import VrmModel # noqa
 from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink # noqa
 from mmd.PmxData import Bdef1, Bdef2, Bdef4, VertexMorphOffset, GroupMorphData # noqa
@@ -572,12 +574,13 @@ class VrmReader(PmxReader):
 
                 logger.info('-- 剛体・ジョイントデータ解析')
 
-                # スカートの横ジョイント
-                # スカートの根元剛体リストを取得
-                skirt_root_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if "Skirt" in rv.name and rv.mode == 2}
-                if len(skirt_root_rigidbodies) > 0:
-                    skirt_root_bones = {bv.index: bv for bv in pmx.bones.values() if bv.name in skirt_root_rigidbodies.keys()}
-                    self.create_all_horizonal_joint(pmx, skirt_root_bones, skirt_root_rigidbodies)
+                # FIXME
+                # # スカートとかの横ジョイント
+                # # スカートの根元剛体リストを取得
+                # skirt_root_rigidbodies = {rk: rv for rk, rv in pmx.rigidbodies.items() if "Skirt" in rv.name and rv.mode == 2}
+                # if len(skirt_root_rigidbodies) > 0:
+                #     skirt_root_bones = {bv.index: bv for bv in pmx.bones.values() if bv.name in skirt_root_rigidbodies.keys()}
+                #     self.create_all_horizonal_joint(pmx, skirt_root_bones, skirt_root_rigidbodies)
 
                 # ボーンの表示枠 ------------------------
                 for jp_bone_name, bone in pmx.bones.items():
@@ -744,9 +747,17 @@ class VrmReader(PmxReader):
         # ボーンに紐付く頂点リストを取得
         vertex_list = []
         normal_list = []
+        # 強参照頂点
+        strong_vertex_list = []
         for vertex in bone_vertices[bone.index]:
             vertex_list.append(vertex.position.data().tolist())
             normal_list.append(vertex.normal.data().tolist())
+            if bone.index in vertex.deform.get_idx_list(0.5):
+                strong_vertex_list.append(vertex.position.data().tolist())
+        # 最小(強参照)
+        strong_min_vertex = np.min(np.array(strong_vertex_list), axis=0) if len(strong_vertex_list) > 0 else [0, 0, 0]
+        # 最大(強参照)
+        strong_max_vertex = np.max(np.array(strong_vertex_list), axis=0) if len(strong_vertex_list) > 0 else [0, 0, 0]
         vertex_ary = np.array(vertex_list)
         # 法線の平均値
         mean_normal = np.mean(np.array(vertex_list), axis=0)
@@ -756,8 +767,20 @@ class VrmReader(PmxReader):
         max_vertex = np.max(vertex_ary, axis=0)
         # 中央
         center_vertex = np.median(vertex_ary, axis=0)
+
+        # ボーンの向き先に沿う
+        tail_bone = None
+        if bone.tail_index > 0:
+            tail_bone = [b for b in pmx.bones.values() if bone.tail_index == b.index][0]
+            tail_position = tail_bone.position
+        else:
+            tail_position = bone.tail_position + bone.position
+
         # サイズ
-        diff_size = np.abs(max_vertex - min_vertex)
+        if len(strong_vertex_list) > 0 and ((bone and bone.tail_index == -1) or (rigidbody_type == 1 and tail_bone and tail_bone.tail_index == -1)):
+            diff_size = np.abs(strong_max_vertex - strong_min_vertex)
+        else:
+            diff_size = np.abs(max_vertex - min_vertex)
         shape_size = MVector3D()
         shape_rotation = MVector3D()
         if rigidbody_type == 0:
@@ -768,48 +791,54 @@ class VrmReader(PmxReader):
                 center_vertex[0] = bone.position.x()
                 center_vertex[1] = min_vertex[1] + (max_vertex[1] - min_vertex[1]) / 2
                 center_vertex[2] = bone.position.z()
-                shape_size = MVector3D(eye_length * rigidbody_factor, eye_length, eye_length)
+                shape_size = MVector3D(eye_length, eye_length, eye_length) * rigidbody_factor
             else:
                 # それ以外（胸とか）はそのまま
                 max_size = np.max(diff_size) * rigidbody_factor
                 shape_size = MVector3D(max_size, max_size, max_size)
         else:
             # カプセルと箱
-            # ボーンの向き先に沿う
-            if bone.tail_index > 0:
-                tail_bone = [b for b in pmx.bones.values() if bone.tail_index == b.index][0]
-                tail_position = tail_bone.position
-            else:
-                tail_position = bone.tail_position + bone.position
             axis_vec = tail_position - bone.position
-            tail_vec = axis_vec.normalized().data()
+            tail_pos = axis_vec.normalized()
+            tail_vec = tail_pos.data()
             diff_vec = MVector3D(diff_size).normalized().data()
             
             # 回転量
+            to_vec = MVector3D.crossProduct(MVector3D(mean_normal), MVector3D(tail_vec)).normalized()
             if rigidbody_type == 1:
                 # 箱
-                rot = MQuaternion.rotationTo(MVector3D(1, 0, 0), MVector3D.crossProduct(MVector3D(mean_normal), MVector3D(tail_vec)))
+                rot = MQuaternion.rotationTo(MVector3D(0, 1 * np.sign(tail_vec[1]), 0), tail_pos)
+                rot *= MQuaternion.rotationTo(MVector3D(1 * np.sign(tail_vec[0]), 0, 0), to_vec.normalized())
             else:
                 # カプセル
-                rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), MVector3D(tail_vec))
-            tail_vec_idx = np.argmax(np.abs(diff_vec))
+                rot = MQuaternion.rotationTo(MVector3D(0, 1, 0), tail_pos)
             shape_euler = rot.toEulerAngles()
             shape_rotation = MVector3D(math.radians(shape_euler.x()), math.radians(shape_euler.y()), math.radians(shape_euler.z()))
 
+            # 軸の長さ別剛体のサイズ
+            tail_vec_idx = np.argmax(np.abs(diff_vec))
             # 軸の長さ
             if rigidbody_type == 1:
-                shape_size = MVector3D(diff_size[0] * 0.7, diff_size[1] * 0.8, diff_size[2] * 0.2)
+                # 箱
+                if (tail_bone and tail_bone.tail_index == -1):
+                    # 末端の場合、頂点の距離感で決める
+                    shape_size = MVector3D(diff_size[0], diff_size[1], diff_size[2] * 0.2) * rigidbody_factor
+                else:
+                    # 途中の場合、ボーンの距離感で決める
+                    shape_size = MVector3D(diff_size[0], bone.position.y() - tail_position.y(), diff_size[2] * 0.2) * rigidbody_factor
+                    center_vertex = bone.position + (tail_position - bone.position) / 2
             else:
-                diff_length = tail_position.distanceToPoint(bone.position)
+                # カプセル
                 if tail_vec_idx == 0:
                     # X軸方向に伸びてる場合 / 半径：Y, 高さ：X
-                    shape_size = MVector3D(diff_size[1] * rigidbody_factor, diff_length, diff_size[2])
+                    shape_size = MVector3D(diff_size[1] / 2, abs(axis_vec.x() + 0.3), diff_size[2]) * rigidbody_factor
                 else:
                     # Y軸方向に伸びてる場合 / 半径：X, 高さ：Y
-                    shape_size = MVector3D(diff_size[0] * rigidbody_factor, diff_length, diff_size[2])
-            center_vertex = bone.position + (tail_position - bone.position) / 2
+                    shape_size = MVector3D(diff_size[0] / 2, abs(axis_vec.y() + 0.3), diff_size[2]) * rigidbody_factor
 
-        logger.debug("bone: %s, min: %s, max: %s, center: %s", bone.name, min_vertex, max_vertex, center_vertex)
+                center_vertex = bone.position + (tail_position - bone.position) / 2
+
+        logger.debug("bone: %s, min: %s, max: %s, center: %s, size: %s", bone.name, min_vertex, max_vertex, center_vertex, shape_size.to_log())
         rigidbody = RigidBody(bone.name, bone.english_name, bone.index, collision_group, no_collision_group, \
                               rigidbody_type, shape_size, MVector3D(center_vertex), shape_rotation, \
                               rigidbody_param[0], rigidbody_param[1], rigidbody_param[2], rigidbody_param[3], rigidbody_param[4], rigidbody_mode)
@@ -1142,7 +1171,7 @@ class VrmReader(PmxReader):
             elif "下半身" == bone_name:
                 pmx.bones[bone_name].flag = 0x0000 | 0x0002 | 0x0008 | 0x0010
                 pmx.bones[bone_name].tail_index = -1
-                pmx.bones[bone_name].tail_position = pmx.bones[bone_name].position - pmx.bones["腰"].position
+                pmx.bones[bone_name].tail_position = pmx.bones["腰"].position - pmx.bones[bone_name].position
         
         # MMDで定義されていないボーン類
         for bone_name, bone in bones.items():

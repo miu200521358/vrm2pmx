@@ -70,15 +70,15 @@ class MainFrame(wx.Frame):
         # ---------------------------------------------
 
         # PMX変換タブ
-        self.export_panel_ctrl = ExportPanel(self, self.note_ctrl, 9)
+        self.export_panel_ctrl = ExportPanel(self, self.note_ctrl, 0)
         self.note_ctrl.AddPage(self.export_panel_ctrl, u"PMX変換", False)
 
         # 剛体設定タブ
-        self.rigidbody_panel_ctrl = RigidbodyPanel(self, self.note_ctrl, 9)
+        self.rigidbody_panel_ctrl = RigidbodyPanel(self, self.note_ctrl, 1)
         self.note_ctrl.AddPage(self.rigidbody_panel_ctrl, u"準標準剛体", False)
 
         # 物理設定タブ
-        self.physics_panel_ctrl = PhysicsPanel(self, self.note_ctrl, 9)
+        self.physics_panel_ctrl = PhysicsPanel(self, self.note_ctrl, 2)
         self.note_ctrl.AddPage(self.physics_panel_ctrl, u"物理", False)
 
         # ---------------------------------------------

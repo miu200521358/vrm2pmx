@@ -71,7 +71,7 @@ class PhysicsPanel(BasePanel):
         for rigidbody_name, physics_set in self.physics_sets.items():
             rigidbody_cnt = 0
             if "rigidBody" in rigidbody_pairs[rigidbody_name]:
-                rigidbody_pairs[rigidbody_name]["rigidbodySegmentation"] = physics_set.physics_ctrls[0].GetValue()
+                rigidbody_pairs[rigidbody_name]["rigidbodySubdivision"] = physics_set.physics_ctrls[0].GetValue()
                 rigidbody_pairs[rigidbody_name]["rigidbodyFactor"] = physics_set.physics_ctrls[1].GetValue()
                 rigidbody_pairs[rigidbody_name]["rigidbodyParamFrom"][1] = physics_set.physics_ctrls[2].GetValue()
                 rigidbody_pairs[rigidbody_name]["rigidbodyParamFrom"][2] = physics_set.physics_ctrls[3].GetValue()
@@ -152,7 +152,7 @@ class PhysicsPanel(BasePanel):
                     for vrm_bone_name, physics_dict in self.get_physics_pairs().items():
                         row = []
                         if "rigidBody" in physics_dict:
-                            row = [vrm_bone_name, physics_dict["rigidbodySegmentation"], physics_dict["rigidbodyFactor"], physics_dict["rigidbodyParamFrom"][1], \
+                            row = [vrm_bone_name, physics_dict["rigidbodySubdivision"], physics_dict["rigidbodyFactor"], physics_dict["rigidbodyParamFrom"][1], \
                                    physics_dict["rigidbodyParamFrom"][2], physics_dict["rigidbodyParamFrom"][3], \
                                    physics_dict["rigidbodyParamFrom"][4], physics_dict["rigidbodyParamTo"][0], physics_dict["rigidbodyCoefficient"], \
                                    physics_dict["rigidbodyParamTo"][1], physics_dict["rigidbodyParamTo"][2], \
@@ -211,8 +211,8 @@ class PhysicsSet():
 
             # 剛体根元値 ---------
 
-            self.physics_ctrls.append(wx.SpinCtrl(self.window, id=wx.ID_ANY, size=wx.Size(75, -1), value=f"{self.physics_pair['rigidbodySegmentation']}", \
-                                                  min=1, max=3, initial=self.physics_pair['rigidbodySegmentation']))
+            self.physics_ctrls.append(wx.SpinCtrl(self.window, id=wx.ID_ANY, size=wx.Size(75, -1), value=f"{self.physics_pair['rigidbodySubdivision']}", \
+                                                  min=1, max=3, initial=self.physics_pair['rigidbodySubdivision']))
             self.physics_ctrls[-1].Bind(wx.EVT_MOUSEWHEEL, lambda event: self.frame.on_wheel_spin_ctrl(event, 1))
             self.grid_sizer.Add(self.physics_ctrls[-1], 0, wx.ALL, 5)
 
