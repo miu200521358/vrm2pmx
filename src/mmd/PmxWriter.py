@@ -1,20 +1,17 @@
 # -*- coding: utf-8 -*-
 #
-from math import modf
 import struct
-from sys import maxsize
-from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef, VertexMorphOffset, GroupMorphData # noqa
+from mmd.PmxData import PmxModel, Bone, RigidBody, Vertex, Material, Morph, DisplaySlot, RigidBody, Joint, Ik, IkLink, Bdef1, Bdef2, Bdef4, Sdef, Qdef, VertexMorphOffset, GroupMorphData
+from mmd.PmxReader import PmxReader
+from module.MMath import MVector3D # noqa
 from utils.MLogger import MLogger # noqa
-import os
-import glob
-from pathlib import Path
 
 logger = MLogger(__name__, level=1)
 
-TYPE_FLOAT = '<f'
-TYPE_BYTE = 'b'
-TYPE_BOOL = '<b'
-TYPE_UNSIGNED_BOOL = '<B'
+TYPE_FLOAT = 'f'
+TYPE_BOOL = 'c'
+TYPE_BYTE = '<b'
+TYPE_UNSIGNED_BYTE = '<B'
 TYPE_SHORT = '<h'
 TYPE_UNSIGNED_SHORT = '<H'
 TYPE_INT = '<i'
@@ -29,6 +26,36 @@ class PmxWriter:
     
     def write(self, pmx: PmxModel, output_path: str):
         with open(output_path, "wb") as fout:
+
+            # # 頂点データ（キー：ボーンINDEX、値：頂点データリスト）
+            # pmx.vertices = {}
+            # # 面データ
+            # pmx.indices = []
+            # # テクスチャデータ
+            # pmx.textures = []
+            # # 材質データ
+            # pmx.materials = {}
+            # # # ボーンデータ
+            # # pmx.bones = {}
+            # # モーフデータ(順番保持)
+            # pmx.morphs = {}
+            # # 表示枠データ
+            # pmx.display_slots = {}
+            # # 剛体データ
+            # pmx.rigidbodies = {}
+            # # ジョイントデータ
+            # pmx.joints = {}
+            # pmx.name = ''
+            # pmx.english_name = ''
+            # pmx.comment = ''
+            # pmx.english_comment = ''
+
+            # # 表示枠 ------------------------
+            # pmx.display_slots["Root"] = DisplaySlot("Root", "Root", 1, 1)
+            # pmx.display_slots["表情"] = DisplaySlot("表情", "Exp", 1, 1)
+
+            # pmx.bones = {}
+            # pmx.bones["全ての親"] = Bone("全ての親", "Root", MVector3D(0, 0, 0), -1, 0, 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0010)
 
             # 頂点の数
             vertex_cnt = 0
@@ -45,22 +72,22 @@ class PmxWriter:
             # 追加UV数
             fout.write(struct.pack(TYPE_BYTE, 0))
             # 頂点Indexサイズ | 1,2,4 のいずれか
-            vertex_idx_size, vertex_idx_type, vertex_idx_unsigned_type = self.define_index_size(vertex_cnt)
+            vertex_idx_size, vertex_idx_type = self.define_index_size(vertex_cnt)
             fout.write(struct.pack(TYPE_BYTE, vertex_idx_size))
             # テクスチャIndexサイズ | 1,2,4 のいずれか
-            texture_idx_size, texture_idx_type, texture_idx_unsigned_type = self.define_index_size(len(pmx.textures))
+            texture_idx_size, texture_idx_type = self.define_index_size(len(pmx.textures))
             fout.write(struct.pack(TYPE_BYTE, texture_idx_size))
             # 材質Indexサイズ | 1,2,4 のいずれか
-            material_idx_size, material_idx_type, material_idx_unsigned_type = self.define_index_size(len(pmx.materials))
+            material_idx_size, material_idx_type = self.define_index_size(len(pmx.materials))
             fout.write(struct.pack(TYPE_BYTE, material_idx_size))
             # ボーンIndexサイズ | 1,2,4 のいずれか
-            bone_idx_size, bone_idx_type, bone_idx_unsigned_type = self.define_index_size(len(pmx.bones))
+            bone_idx_size, bone_idx_type = self.define_index_size(len(pmx.bones))
             fout.write(struct.pack(TYPE_BYTE, bone_idx_size))
             # モーフIndexサイズ | 1,2,4 のいずれか
-            morph_idx_size, morph_idx_type, morph_idx_unsigned_type = self.define_index_size(len(pmx.morphs))
+            morph_idx_size, morph_idx_type = self.define_index_size(len(pmx.morphs))
             fout.write(struct.pack(TYPE_BYTE, morph_idx_size))
             # 剛体Indexサイズ | 1,2,4 のいずれか
-            rigidbody_idx_size, rigidbody_idx_type, rigidbody_idx_unsigned_type = self.define_index_size(len(pmx.rigidbodies))
+            rigidbody_idx_size, rigidbody_idx_type = self.define_index_size(len(pmx.rigidbodies))
             fout.write(struct.pack(TYPE_BYTE, rigidbody_idx_size))
 
             # モデル名(日本語)
@@ -93,18 +120,18 @@ class PmxWriter:
                     # deform
                     if type(vertex.deform) is Bdef1:
                         fout.write(struct.pack(TYPE_BYTE, 0))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index0)))
                     elif type(vertex.deform) is Bdef2:
                         fout.write(struct.pack(TYPE_BYTE, 1))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index1)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index0)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index1)))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight0))
                     elif type(vertex.deform) is Bdef4:
                         fout.write(struct.pack(TYPE_BYTE, 2))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index0)))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index1)))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index2)))
-                        fout.write(struct.pack(bone_idx_unsigned_type, int(vertex.deform.index3)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index0)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index1)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index2)))
+                        fout.write(struct.pack(bone_idx_type, int(vertex.deform.index3)))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight0))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight1))
                         fout.write(struct.pack(TYPE_FLOAT, vertex.deform.weight2))
@@ -210,14 +237,14 @@ class PmxWriter:
                 # ボーンフラグ
                 fout.write(struct.pack(TYPE_SHORT, bone.flag))
 
-                if not bone.getConnectionFlag():
+                if bone.getConnectionFlag():
+                    # 接続先ボーンのボーンIndex
+                    fout.write(struct.pack(bone_idx_type, bone.tail_index))
+                else:
                     # 接続先位置
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.x())))
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.y())))
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.tail_position.z())))
-                elif bone.getConnectionFlag():
-                    # 接続先ボーンのボーンIndex
-                    fout.write(struct.pack(bone_idx_type, bone.tail_index))
 
                 if bone.getExternalRotationFlag() or bone.getExternalTranslationFlag():
                     # 付与親指定ありの場合
@@ -239,6 +266,9 @@ class PmxWriter:
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.x())))
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.y())))
                     fout.write(struct.pack(TYPE_FLOAT, float(bone.local_z_vector.z())))
+
+                if bone.getExternalParentDeformFlag():
+                    fout.write(struct.pack(TYPE_INT, bone.external_key))
 
                 if bone.getIkFlag():
                     # IKボーン
@@ -265,7 +295,7 @@ class PmxWriter:
                             fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.x())))
                             fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.y())))
                             fout.write(struct.pack(TYPE_FLOAT, float(link.limit_max.z())))
-
+            
             logger.info(f"-- ボーンデータ出力終了({len(list(pmx.bones.values()))})")
 
             # モーフの数
@@ -364,7 +394,7 @@ class PmxWriter:
                 fout.write(struct.pack(TYPE_BYTE, rigidbody.mode))
 
             logger.info(f"-- 剛体データ出力終了({len(list(pmx.rigidbodies.values()))})")
-
+            
             # ジョイントの数
             fout.write(struct.pack(TYPE_INT, len(list(pmx.joints.values()))))
 
@@ -412,22 +442,19 @@ class PmxWriter:
                 fout.write(struct.pack(TYPE_FLOAT, float(joint.spring_constant_rotation.z())))
 
             logger.info(f"-- ジョイントデータ出力終了({len(list(pmx.joints.values()))})")
-
+            
     def define_index_size(self, size: int):
         if 32768 < size:
             idx_size = 4
             idx_type = TYPE_INT
-            idx_unsigned_type = TYPE_UNSIGNED_INT
         elif 128 < size < 32767:
             idx_size = 2
             idx_type = TYPE_SHORT
-            idx_unsigned_type = TYPE_UNSIGNED_SHORT
         else:
             idx_size = 1
-            idx_type = TYPE_BOOL
-            idx_unsigned_type = TYPE_UNSIGNED_BOOL
+            idx_type = TYPE_BYTE
 
-        return idx_size, idx_type, idx_unsigned_type
+        return idx_size, idx_type
 
     def write_text(self, fout, text: str, default_text: str, type=TYPE_INT):
         try:

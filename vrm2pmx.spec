@@ -19,14 +19,14 @@ a = Analysis(['src\\executor.py'],
              noarchive=False)
 pyz = PYZ(a.pure, a.zipped_data,
              cipher=block_cipher)
-a.datas += [('.\\src\\Vrm2PmxExporter.ico','.\\src\\Vrm2PmxConverter.ico', 'Data')]
+a.datas += [('.\\src\\Vrm2PmxConverter.ico', '.\\src\\Vrm2PmxConverter.ico', 'Data'), ('.\\src\\base.pmx', '.\\src\\base.pmx', 'Data')]
 exe = EXE(pyz,
           a.scripts,
           a.binaries,
           a.zipfiles,
           a.datas,
           [],
-          name='Vrm2PmxConverter_1.00_β01_64bit',
+          name='Vrm2PmxConverter_1.00_β02_64bit',
           debug=False,
           bootloader_ignore_signals=False,
           strip=False,

@@ -420,14 +420,14 @@ class PmxReader:
                         display_type = self.read_int(1)
                         if display_type == 0:
                             born_idx = self.read_bone_index_size()
-                            display_slot.references.append((display_type, born_idx))
+                            display_slot.references.append(born_idx)
                             # ボーン表示ON
                             for v in pmx.bones.values():
                                 if v.index == born_idx:
                                     v.display = True
                         elif display_type == 1:
                             morph_idx = self.read_morph_index_size()
-                            display_slot.references.append((display_type, morph_idx))
+                            display_slot.references.append(morph_idx)
                             # モーフ表示ON
                             for v in pmx.morphs.values():
                                 if v.index == morph_idx:
@@ -515,11 +515,11 @@ class PmxReader:
             # 終了命令
             raise ke
         except SizingException as se:
-            logger.error("サイジング処理が処理できないデータで終了しました。\n\n%s", se.message)
+            logger.error("サイジング処理が処理できないデータで終了しました。\n\n%s", se.message, decoration=MLogger.DECORATION_BOX)
             return se
         except Exception as e:
             import traceback
-            logger.error("サイジング処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc())
+            logger.critical("サイジング処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc(), decoration=MLogger.DECORATION_BOX)
             raise e
 
     def hexdigest(self):

@@ -11,9 +11,11 @@ from mmd.VrmData import VrmModel # noqa
 from mmd.VrmReader import VrmReader
 from mmd.PmxData import PmxModel # noqa
 from mmd.PmxWriter import PmxWriter
+from mmd.PmxReader import PmxReader
 from module.MMath import MRect, MVector3D, MVector4D, MQuaternion, MMatrix4x4 # noqa
 from utils.MLogger import MLogger # noqa
 from utils.MException import SizingException, MKilledException
+from utils import MFileUtils
 
 logger = MLogger(__name__, level=1)
 
@@ -53,13 +55,9 @@ class Vrm2PmxExportService():
         except MKilledException:
             return False
         except SizingException as se:
-            logger.error("全親移植処理が処理できないデータで終了しました。\n\n%s", se.message, decoration=MLogger.DECORATION_BOX)
+            logger.error("VRM2PMX変換処理が処理できないデータで終了しました。\n\n%s", se.message, decoration=MLogger.DECORATION_BOX)
         except Exception:
-            logger.critical("全親移植処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc(), decoration=MLogger.DECORATION_BOX)
+            logger.critical("VRM2PMX変換処理が意図せぬエラーで終了しました。\n\n%s", traceback.format_exc(), decoration=MLogger.DECORATION_BOX)
         finally:
             logging.shutdown()
-
-    # 全親移植処理実行
-    def convert_pmx(self):
-        vrm_model = self.options.vrm_model
 

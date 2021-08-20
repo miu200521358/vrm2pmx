@@ -12,6 +12,7 @@ from form.parts.ConsoleCtrl import ConsoleCtrl
 from form.worker.ExportWorkerThread import ExportWorkerThread
 from utils import MFormUtils, MFileUtils
 from utils.MLogger import MLogger # noqa
+from mmd.PmxReader import PmxReader
 
 logger = MLogger(__name__)
 TIMER_ID = wx.NewId()
@@ -28,7 +29,9 @@ class ExportPanel(BasePanel):
 
         self.header_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.description_txt = wx.StaticText(self, wx.ID_ANY, u"Vroid Studio で作成された VRMデータをMMD用の準標準ボーンっぽいPMXデータに変換します。", wx.DefaultPosition, wx.DefaultSize, 0)
+        self.description_txt = wx.StaticText(self, wx.ID_ANY, u"Vroid Studio で作成された VRMデータをMMD用の準標準ボーンっぽいPMXデータに変換します。\n" \
+                                             + "※Vroid Studio 以外のツール（Blender等）を介して生成されたVrmモデルは、\n" \
+                                             + "データ形式が想定外なので変換に失敗します。", wx.DefaultPosition, wx.DefaultSize, 0)
         self.header_sizer.Add(self.description_txt, 0, wx.ALL, 5)
 
         self.static_line01 = wx.StaticLine(self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.LI_HORIZONTAL)
@@ -58,11 +61,11 @@ class ExportPanel(BasePanel):
         self.export_btn_ctrl.Bind(wx.EVT_LEFT_DCLICK, self.on_doubleclick)
         btn_sizer.Add(self.export_btn_ctrl, 0, wx.ALL, 5)
 
-        # 多段分割変換実行ボタン
-        self.validate_btn_ctrl = wx.Button(self, wx.ID_ANY, u"PMX読み込み", wx.DefaultPosition, wx.Size(200, 50), 0)
-        self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DOWN, self.on_validate)
-        self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DCLICK, self.on_doubleclick)
-        btn_sizer.Add(self.validate_btn_ctrl, 0, wx.ALL, 5)
+        # # 多段分割変換実行ボタン
+        # self.validate_btn_ctrl = wx.Button(self, wx.ID_ANY, u"PMX読み込み", wx.DefaultPosition, wx.Size(200, 50), 0)
+        # self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DOWN, self.on_validate)
+        # self.validate_btn_ctrl.Bind(wx.EVT_LEFT_DCLICK, self.on_doubleclick)
+        # btn_sizer.Add(self.validate_btn_ctrl, 0, wx.ALL, 5)
 
         self.sizer.Add(btn_sizer, 0, wx.ALIGN_CENTER | wx.SHAPED, 5)
 
@@ -118,6 +121,8 @@ class ExportPanel(BasePanel):
         return False
     
     def on_validate(self, event: wx.Event):
+        # reader = PmxReader(MFileUtils.resource_path('src/base.pmx'))
+        # reader.read_data()
         self.output_pmx_file_ctrl.load()
     
     # 多段分割変換

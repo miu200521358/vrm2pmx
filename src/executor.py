@@ -12,7 +12,7 @@ from form.MainFrame import MainFrame
 from utils.MLogger import MLogger
 from utils import MFileUtils
 
-VERSION_NAME = "1.00_β01"
+VERSION_NAME = "1.00_β02"
 
 # 指数表記なし、有効小数点桁数6、30を超えると省略あり、一行の文字数200
 np.set_printoptions(suppress=True, precision=6, threshold=30, linewidth=200)
@@ -83,7 +83,7 @@ if __name__ == '__main__':
 
         # 引数指定がない場合、通常起動
         app = wx.App(False)
-        icon = wx.Icon(MFileUtils.resource_path('src/Vrm2PmxExporter.ico'), wx.BITMAP_TYPE_ICO)
+        icon = wx.Icon(MFileUtils.resource_path('src/Vrm2PmxConverter.ico'), wx.BITMAP_TYPE_ICO)
         frame = MainFrame(None, mydir_path, now_version_name, args.verbose, is_saving, is_out_log)
         frame.SetIcon(icon)
         frame.Show(True)
