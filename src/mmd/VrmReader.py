@@ -251,7 +251,7 @@ class VrmReader(PmxReader):
                                         logger.test(f'{midx}-{pidx}: start({pmx.vertices[primitive["material"]][0].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][:3]]}')
                                         logger.test(f'{midx}-{pidx}: end({pmx.vertices[primitive["material"]][-1].index}): {[v.position.to_log() for v in pmx.vertices[primitive["material"]][-3:-1]]}')
                                     
-                hair_regexp = r'((F\d+_\d+_Hair_\d+)_HAIR_\d+)'
+                hair_regexp = r'((F\d+_\d+_Hair_\d+)_HAIR)'
 
                 if "meshes" in vrm.json_data:
                     for midx, mesh in enumerate(vrm.json_data["meshes"]):
@@ -338,8 +338,9 @@ class VrmReader(PmxReader):
                                                 else:
                                                     emissive_ary = np.array([0, 0, 0, 1])
                                                 emissive_img = Image.fromarray(np.tile(emissive_ary * 255, (spe_ary.shape[0], spe_ary.shape[1], 1)).astype(np.uint8))
+                                                # 乗算
                                                 hair_emissive_img = ImageChops.multiply(spe_img, emissive_img)
-
+                                                # スクリーン
                                                 dest_img = ImageChops.screen(hair_diffuse_img, hair_emissive_img)
                                                 dest_img.save(os.path.join(tex_dir_path, hair_blend_name))
 
@@ -348,6 +349,7 @@ class VrmReader(PmxReader):
 
                                                 # 拡散色と環境色は固定
                                                 diffuse_color = MVector3D(1, 1, 1)
+                                                specular_color = MVector3D()
                                                 ambient_color = diffuse_color / 2
                                             else:
                                                 # スペキュラがない場合、ないし反映させない場合、そのまま設定
@@ -384,7 +386,8 @@ class VrmReader(PmxReader):
                                                             ambient_color, flag, edge_color, edge_size, texture_index, sphere_texture_index, sphere_mode, toon_sharing_flag, \
                                                             toon_texture_index, "", len(indices))
                                         
-                                        material_key = "Eye" if "Eye" in material.name else vrm_material["alphaMode"]
+                                        # 材質順番を決める
+                                        material_key = "EyeHighlight" if "EyeHighlight" in material.name else "Eye" if "Eye" in material.name else vrm_material["alphaMode"]
 
                                         if material_key not in materials_by_type:
                                             materials_by_type[material_key] = {}
@@ -396,7 +399,7 @@ class VrmReader(PmxReader):
                                         materials_by_type[vrm_material["alphaMode"]][vrm_material["name"]].vertex_count += len(indices)
                 
                 # 材質を不透明(OPAQUE)→透明順(BLEND)に並べ替て設定
-                for material_type in ["OPAQUE", "MASK", "BLEND", "Eye"]:
+                for material_type in ["OPAQUE", "MASK", "BLEND", "Eye", "EyeHighlight"]:
                     if material_type in materials_by_type:
                         for material in materials_by_type[material_type].values():
                             pmx.materials[material.name] = material
